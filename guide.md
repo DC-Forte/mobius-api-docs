@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Integration Guide
+wide: true
 ---
 
 # Hiresense Handoff API — Integration Guide

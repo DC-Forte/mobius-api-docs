@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ page.title | default: site.title }}</title>
+  <meta name="description" content="{{ page.description | default: site.description }}" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%233457d5%22/><path d=%22M9 22V10l7 7 7-7v12%22 stroke=%22%23fff%22 stroke-width=%222.5%22 fill=%22none%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>" />
+  <link rel="stylesheet" href="{{ '/assets/css/style.css' | relative_url }}" />
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="{{ '/' | relative_url }}">
+      <span class="logo"></span>
+      Hiresense Handoff API
+    </a>
+    <nav class="site-nav">
+      <a href="{{ '/guide.html' | relative_url }}" {% if page.url == '/guide.html' %}class="active"{% endif %}>Guide</a>
+      <a href="{{ '/api/' | relative_url }}" {% if page.url contains '/api/' %}class="active"{% endif %}>API Reference</a>
+      <a href="{{ '/CHANGELOG.html' | relative_url }}" {% if page.url == '/CHANGELOG.html' %}class="active"{% endif %}>Changelog</a>
+      <span class="badge">v{{ site.version }}</span>
+    </nav>
+  </header>
+
+  <main class="page{% if page.wide %} wide{% endif %}">
+    {{ content }}
+  </main>
+
+  <footer class="site-footer">
+    Hiresense Handoff API · v{{ site.version }} · <a href="{{ '/CHANGELOG.html' | relative_url }}">release notes</a>
+  </footer>
+</body>
+</html>

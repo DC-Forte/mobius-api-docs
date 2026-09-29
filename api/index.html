@@ -2,12 +2,53 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Hiresense Handoff API Reference</title>
+  <title>API Reference — Hiresense Handoff API</title>
   <meta name="robots" content="noindex, nofollow" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%228%22 fill=%22%233457d5%22/><path d=%22M9 22V10l7 7 7-7v12%22 stroke=%22%23fff%22 stroke-width=%222.5%22 fill=%22none%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>" />
+  <style>
+    html, body { margin: 0; padding: 0; }
+    .back-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      font: 600 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #14161b;
+      color: #9aa1ad;
+      border-bottom: 1px solid #2a2e37;
+    }
+    .back-bar a { color: #e7e9ee; text-decoration: none; }
+    .back-bar a:hover { color: #7d97ff; }
+    #redoc-container { min-height: calc(100vh - 37px); }
+  </style>
 </head>
 <body>
-  <redoc spec-url="../openapi/mobius-handoff-v1.yaml"></redoc>
+  <div class="back-bar">
+    <a href="../">&larr; Hiresense Handoff API</a>
+    <span>/ API Reference</span>
+  </div>
+  <div id="redoc-container"></div>
   <script src="https://cdn.jsdelivr.net/npm/redoc@2/bundles/redoc.standalone.js"></script>
+  <script>
+    Redoc.init(
+      "../openapi/mobius-handoff-v1.yaml",
+      {
+        theme: {
+          colors: {
+            primary: { main: "#3457d5" },
+          },
+          typography: {
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            code: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" },
+          },
+          sidebar: { backgroundColor: "#14161b", textColor: "#e7e9ee" },
+        },
+        hideDownloadButton: false,
+        expandResponses: "200,204",
+      },
+      document.getElementById("redoc-container")
+    );
+  </script>
 </body>
 </html>
