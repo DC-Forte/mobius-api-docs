@@ -111,6 +111,12 @@ body {
   border: 1px solid var(--border);
 }
 
+.badge-muted {
+  font-weight: 400;
+  border-color: transparent;
+  background: transparent;
+}
+
 main.page {
   max-width: 820px;
   margin: 0 auto;

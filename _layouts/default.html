@@ -20,6 +20,7 @@
       <a href="{{ '/api/' | relative_url }}" {% if page.url contains '/api/' %}class="active"{% endif %}>API Reference</a>
       <a href="{{ '/CHANGELOG.html' | relative_url }}" {% if page.url == '/CHANGELOG.html' %}class="active"{% endif %}>Changelog</a>
       <span class="badge">v{{ site.version }}</span>
+      <span class="badge badge-muted">Updated {{ site.updated }}</span>
     </nav>
   </header>
 
@@ -28,7 +29,8 @@
   </main>
 
   <footer class="site-footer">
-    Hiresense Handoff API · v{{ site.version }} · <a href="{{ '/CHANGELOG.html' | relative_url }}">release notes</a>
+    Hiresense Handoff API · v{{ site.version }} · updated {{ site.updated }} ·
+    <a href="{{ '/CHANGELOG.html' | relative_url }}">release notes</a>
   </footer>
 </body>
 </html>
