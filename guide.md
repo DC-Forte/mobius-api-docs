@@ -206,8 +206,8 @@ LiveKit) with header `Authorization: Bearer <candidateToken>`:
 | --- | --- |
 | `POST /candidate-api/v1/interviews/{interviewId}/start` | Provisions the LiveKit room and dispatches the AI interviewer. Returns `{ livekit_token, room_name, interview: { livekit: { url }, proctoring? } }` — `interview.proctoring` (`{ sessionId, sessionToken, baseUrl }`) is present only once incProc's SDK integration is live on our side (see "incProc proctoring SDK" below); until then it's simply absent, not an error. Call once per session — safe to retry if it fails, calling again on an already-started interview reuses the same room rather than creating a new one (the proctoring session is minted once too, not re-minted on retry). |
 | `POST /candidate-api/v1/interviews/{interviewId}/device-check` | Optional — record that the candidate passed a mic/camera check before starting. |
-| `POST /candidate-api/v1/interviews/{interviewId}/end` | Ends the interview once the candidate is done. Triggers scoring. |
-| `GET /candidate-api/v1/interviews/{interviewId}/feedback` | Poll this if you want the report in your own UI instead of (or in addition to) waiting on the webhook — `404` until it's ready. **Shape differs from the webhook/pull-report envelope**: this response is *not* wrapped in `{report, reportV2}` — the report's own fields (`overallScore`, `recommendation`, etc.) and `reportV2` (when present) are all at the top level directly, since there's no externalCandidateId/externalJobId to wrap here. |
+| `POST /candidate-api/v1/interviews/{interviewId}/end` | Ends the interview once the candidate is done. Triggers scoring. Optional JSON body `{ "reason": "<end_reason>" }` — see below. |
+| `GET /candidate-api/v1/interviews/{interviewId}/feedback` | Poll this if you want the report in your own UI instead of (or in addition to) waiting on the webhook — `404` until it's ready. **Shape differs from the webhook/pull-report envelope**: this response is *not* wrapped in `{report, reportV2}` — the report's own fields (`overallScore`, `recommendation`, etc.) and `reportV2` (when present) are all at the top level directly, since there's no externalCandidateId/externalJobId to wrap here. `endReason` is included at the top level whenever `end` was called with a `reason` (see below). |
 | `GET /candidate-api/v1/interviews/{interviewId}/recording/playback` | Fetch a short-lived playback URL for the server-side proctoring recording (see "Proctoring recording" below). `404` until the interview is complete and the recording has finished processing, or if no video was ever published (audio-only interview). |
 | `GET /api/interviewhandoff/livekit-interview/conversation/{interviewId}` | One-time backfill of the transcript so far. |
 | `GET /ws/transcript/{interviewId}` (WebSocket, same host, `ws(s)://`) | Live transcript stream — new turns pushed as the interview happens. No auth header needed (the interview ID itself is the credential, same trust model as the transcript backfill call). |
@@ -229,6 +229,35 @@ these endpoints.
 is `in_progress`, and returns `{ ok: true, already_ended: true, ... }` (still `200`) if called
 twice — safe to call unconditionally when the candidate clicks "finish", no need to track local
 state to avoid a double-call.
+
+**`end`'s optional `reason` field** lets you tell us *why* you ended the call — useful when your
+own frontend detects the camera/mic dropping, or a connection problem, rather than the candidate
+deliberately finishing. Omit it (or send `{}`/no body at all) and nothing changes from before.
+Accepted values:
+
+| Value | Meaning |
+| --- | --- |
+| `user_initiated` | Candidate deliberately ended the interview (clicked "finish"/hung up). |
+| `camera_off` | Your proctoring detected the candidate's camera drop out. |
+| `mic_off` | Your proctoring detected the candidate's mic drop out. |
+| `connection_issue` | You detected a network/connection problem on the candidate's end. |
+| `timeout` | Your own inactivity/session timeout fired. |
+| `other` | Any other reason not covered above. |
+
+An unrecognized value returns `400` with `{ "ok": false, "error": "invalid_reason" }` — the
+interview is left untouched, safe to retry with a corrected value.
+
+Whatever `reason` you sent is stored and propagated back to you two ways, so your FE (or backend)
+can show *why* the interview ended without having to remember what it itself sent:
+
+- `GET .../feedback` includes it as top-level `endReason` once the report is ready, and as
+  `end_reason` (note: snake_case here, matching that response's other fields like
+  `current_state`) on the non-retryable 404 for an interview ended before the 5-minute minimum.
+- The webhook/pull-report envelope (see "Receive the report — your webhook" below) includes it
+  as `endReason`,
+  alongside `reportV2`/`endedEarly` and the existing `connectionEndReason` — that one's a
+  different signal (the AI interviewer's own inferred end reason: deliberate/dropped/timeout),
+  present regardless of who ended the call or whether they sent a `reason` at all.
 
 **3. Join the voice call.** Use the `livekit_token` and `livekit.url` from `start` with a LiveKit
 browser SDK. This connects directly from the candidate's browser to LiveKit Cloud — Hiresense's
@@ -471,9 +500,12 @@ of `reportV2`, the body carries `"endedEarly": true` and delivery is marked done
 {
   "externalCandidateId": "your-candidate-id",
   "externalJobId": "your-job-id",
-  "endedEarly": true
+  "endedEarly": true,
+  "endReason": "camera_off"
 }
 ```
+
+(`endReason` only present when `end` was called with a `reason` — see below.)
 
 A body will always have exactly one of `reportV2` or `endedEarly`, never both.
 
@@ -493,6 +525,13 @@ Never present on an `endedEarly` payload.
   "connectionEndReason": "dropped"
 }
 ```
+
+**`endReason` is optional and echoes back whatever you sent as `end`'s `reason` field** (see
+`end`'s optional `reason` field, above) — the value you supplied, unchanged, e.g.
+`"camera_off"`. Unlike
+`connectionEndReason`, this can appear on an `endedEarly` payload too (a camera/mic drop is a
+common cause of an interview ending before the 5-minute minimum). Omitted entirely when `end`
+was never called with a `reason`.
 
 **`proctoring_summary` is optional too, and arrives alongside `reportV2` the same way** —
 present only once video-analysis proctoring has completed for this interview. Its absence on a

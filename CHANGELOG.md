@@ -9,6 +9,26 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## 1.3.0 — 2026-09-29
+
+### Added
+
+- The `end_reason` from 1.2.0 is now propagated back to you: `GET .../feedback` includes it as
+  top-level `endReason` on a ready report and as `end_reason` on the insufficient_data 404; the
+  webhook/pull-report envelope includes it as `endReason`, alongside the existing
+  `connectionEndReason` (a different, AI-interviewer-inferred signal) — and unlike that field,
+  `endReason` can appear on an `endedEarly` payload too.
+
+## 1.2.0 — 2026-09-29
+
+### Added
+
+- `POST /candidate-api/v1/interviews/{interviewId}/end` now accepts an optional JSON body
+  `{ "reason": "<value>" }` — `user_initiated`, `camera_off`, `mic_off`, `connection_issue`,
+  `timeout`, or `other`. Lets an embedding partner tell us why they ended the call instead of
+  us only knowing it happened. Omitting it (or the whole body) is unchanged from before. An
+  unrecognized value returns `400 invalid_reason` and leaves the interview untouched.
+
 ## 1.1.0 — 2026-09-29
 
 ### Added
