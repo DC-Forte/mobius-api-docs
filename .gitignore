@@ -1,0 +1,13 @@
+# Jekyll build output
+_site/
+.jekyll-cache/
+.jekyll-metadata
+.sass-cache/
+
+# OS cruft
+.DS_Store
+
+# Local agent/tooling state -- never belongs in this repo
+.claude-flow/
+.swarm/
+ruvector.db
