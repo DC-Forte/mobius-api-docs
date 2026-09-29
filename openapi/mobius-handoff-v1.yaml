@@ -1,0 +1,1486 @@
+openapi: 3.0.3
+info:
+  title: Hiresense Handoff API
+  version: "1.1.0"
+  license:
+    name: Proprietary
+    url: https://hiresense-api.dc-forte.com
+  description: >
+    Send a candidate through a live, AI-run Hiresense interview with zero
+    account creation on their end. Two calls total: one to start a session,
+    one webhook you receive when the scored report is ready. Everything in
+    between — identity, job description parsing, the live interview, and
+    scoring — is handled entirely by Hiresense; you never call anything else.
+
+
+    **Flow**
+
+    1. You call `POST /internal/handoff` with the job description and your
+    own candidate/job identifiers. You get back a one-time `interviewUrl`.
+
+    2. You deliver `interviewUrl` to the candidate over whatever channel you
+    like (in-app, WhatsApp, email — it's a plain link).
+
+    3. The candidate opens it in their browser. Hiresense takes it from
+    there: sets up the interview, runs it live (voice, with an AI
+    interviewer), and scores it when it's done. You are not involved in
+    this part at all.
+
+    4. Once scoring finishes, Hiresense POSTs the full report to your
+    webhook URL (configured with us ahead of time). You can also pull the
+    same report on demand with `GET /internal/handoff/report` — see below —
+    instead of, or in addition to, the webhook.
+servers:
+  - url: https://hiresense-api.dc-forte.com
+security:
+  - InternalToken: []
+paths:
+  /internal/handoff:
+    post:
+      summary: Start (or resend) an interview session for a candidate
+      operationId: createHandoff
+      description: >
+        Creates a one-time interview link for a candidate/job pair. Calling
+        this again for the same externalCandidateId+externalJobId pair is
+        treated as a resend of the same session, not a new one — you'll get
+        a fresh link, isResend: true, and an incremented resendCount. After
+        3 resends within a 6-hour window you'll get a 500 with a cooldown
+        message until the window passes — back off and retry later rather
+        than looping.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateHandoffRequest" }
+      responses:
+        "200":
+          description: Interview session created or resent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CreateHandoffResponse" }
+        "400":
+          description: A required field is missing, or returnUrl is invalid (not https, or not on a host you've registered with us)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: Missing or invalid X-Internal-Token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "500":
+          description: Internal failure, or the resend cooldown described above is active
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+      callbacks:
+        yourWebhookEndpoint:
+          "https://your-webhook-url-configured-with-us":
+            post:
+              summary: What your webhook endpoint must accept
+              description: >
+                Not a URL you call — this documents the request your own
+                endpoint needs to handle. We send this once a candidate's
+                interview is scored, to the URL you gave us when we set up
+                your integration.
+              security:
+                - InternalToken: []
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema: { $ref: "#/components/schemas/WebhookReport" }
+              responses:
+                "2XX":
+                  description: >
+                    Respond 2xx to acknowledge. Anything else (or no
+                    response) counts as a failed delivery attempt, retried
+                    on a 30s poll — capped at 5 attempts total (~2.5 min).
+                    After that the delivery is abandoned permanently, not
+                    retried again on its own; recover via
+                    `GET /internal/handoff/report` or by resending (calling
+                    `POST /internal/handoff` again for the same pair, which
+                    resets the attempt count). Don't treat this endpoint as
+                    optional insurance — an outage on your side longer than
+                    the retry window loses the push delivery for good.
+                "4XX":
+                  description: Not expected from you in normal operation — counts as a failed attempt, same as any other non-2xx response (see the 2XX entry above for the retry/cap behavior).
+  /internal/handoff/report:
+    get:
+      summary: Pull the scored report on demand, instead of (or in addition to) the webhook
+      operationId: getHandoffReport
+      description: >
+        The webhook is push, at-least-once, not guaranteed-delivered. Use
+        this for reconciliation, a manual "check status" action, or as your
+        primary delivery mechanism instead of the webhook — same report
+        content either way, this is a genuinely separate code path that
+        happens to build the identical report shape, not a wrapper around
+        the webhook sender.
+      parameters:
+        - name: externalCandidateId
+          in: query
+          required: true
+          schema: { type: string }
+          description: The same value you sent to POST /internal/handoff for this candidate/job.
+        - name: externalJobId
+          in: query
+          required: true
+          schema: { type: string }
+          description: The same value you sent to POST /internal/handoff for this candidate/job.
+      responses:
+        "200":
+          description: >
+            Report ready (`reportV2` set), or the interview ended before
+            the 5-minute minimum and will never have one (`endedEarly:
+            true` instead) — see WebhookReport. The latter is terminal,
+            not "check back later."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookReport" }
+        "400":
+          description: externalCandidateId or externalJobId is missing
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: Missing or invalid X-Internal-Token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: >
+            Not ready yet — covers every case indistinguishably: no handoff
+            session for this pair, the candidate hasn't opened the
+            interview link, the interview isn't completed, feedback hasn't
+            finished generating, or (rare) it finished on an older pipeline
+            with no `reportV2` to deliver. Treat any 404 here the same as
+            "keep waiting." An interview that ended before the 5-minute
+            minimum is the one exception — see the 200 response above.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /internal/handoff/interviews/{interviewId}/clips:
+    get:
+      summary: Get playable answer-clip URLs for one interview, all at once
+      operationId: getHandoffInterviewClips
+      description: >
+        `reportV2` (see WebhookReport) carries a `clip` object next to some
+        quotes — `{message_id, index}`. `message_id` is internal, not
+        something you can use directly; `index` is what you use here. Call
+        this once per interview and match its results back to the
+        `clip.index` values you found in `reportV2` — you never look up or
+        send a message id yourself.
+      parameters:
+        - name: interviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The `interviewId` field already present in every report you receive.
+      responses:
+        "200":
+          description: >
+            Always 200 once the interview and partner check out — an empty
+            `clips` array is a valid answer (no clips available yet, or
+            this interview predates the feature), not a failure. A gap
+            (an index present in `reportV2` but missing here) means that
+            one clip specifically isn't available right now.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  interviewId: { type: string, format: uuid }
+                  clips:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        index: { type: integer, description: Matches a clip.index value from reportV2. }
+                        url: { type: string, description: "Short-lived (about an hour) — re-call this endpoint if it expires before you need it." }
+        "400":
+          description: interviewId is missing or not a valid UUID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "401":
+          description: Missing or invalid X-Internal-Token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: Unrecognized interviewId, or one that isn't yours — treated identically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+  /internal/handoff/interviews/{interviewId}/recording:
+    get:
+      summary: Get a playback URL for the full interview recording
+      operationId: getHandoffInterviewRecording
+      description: >
+        For a recruiter dashboard viewing an interview after the fact —
+        distinct from the candidate-api's own recording/playback (that one
+        is candidateToken-gated, scoped to the candidate's 7-day session,
+        and useless once you're reviewing weeks later). Same recording
+        content either way though — candidate audio/video plus the AI
+        interviewer's voice, never Hiresense's internal candidate-only
+        proctoring recording. Same partner-ownership rules as every other
+        /internal/handoff/interviews endpoint.
+      parameters:
+        - name: interviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The `interviewId` field already present in every report you receive.
+      responses:
+        "200":
+          description: Playback URL available
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingPlaybackResponse" }
+        "400":
+          description: interviewId is missing or not a valid UUID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "401":
+          description: Missing or invalid X-Internal-Token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: >
+            Unrecognized interviewId, one that isn't yours (treated
+            identically), or no recording exists yet for it (still
+            processing, or audio-only with no camera published).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+  /internal/handoff/interviews/{interviewId}/proctoring-log:
+    get:
+      summary: Get the merged proctoring events log for one interview
+      operationId: getHandoffInterviewProctoringLog
+      description: >
+        Merges two independent incProc data sources into one chronological
+        log: the post-call video analysis (looking-away/multiple-faces/
+        device-detected) and the live browser-SDK session's own event log
+        (tab-hidden/fullscreen-exited). Both are read from what Hiresense
+        already fetched and persisted — this never calls incProc live, so
+        it's always fast and never 5xxs because incProc is slow or down.
+        Only meaningful when incProc proctoring is enabled for this
+        interview (see the incProc SDK section) — otherwise `events` is
+        just empty, not an error.
+      parameters:
+        - name: interviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The `interviewId` field already present in every report you receive.
+      responses:
+        "200":
+          description: >
+            Always 200 once the interview and partner check out — an empty
+            `events` array is a valid answer (no proctoring data yet, or
+            proctoring wasn't enabled for this interview), not a failure.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  interviewId: { type: string, format: uuid }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        start: { type: string, format: date-time }
+                        end: { type: string, format: date-time, nullable: true, description: "Absent for a point-in-time event (e.g. exiting fullscreen has no documented 're-entered' counterpart)." }
+                        duration_sec: { type: integer, nullable: true }
+                        description: { type: string, description: "Human-readable, e.g. \"Candidate looking away from screen\"." }
+                        source: { type: string, enum: [video_analysis, browser_session] }
+        "400":
+          description: interviewId is missing or not a valid UUID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "401":
+          description: Missing or invalid X-Internal-Token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: Unrecognized interviewId, or one that isn't yours — treated identically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+  /internal/handoff/interviews/{interviewId}/pause:
+    post:
+      summary: Freeze the AI interviewer mid-call
+      operationId: pauseHandoffInterview
+      description: >
+        For when the candidate's camera or mic drops on your end and you
+        want the AI interviewer to stop mid-call — no new questions asked,
+        no silence-nudging — until you call the matching `/resume` below.
+        There's no candidate-facing pause trigger anywhere in this flow;
+        this is entirely something you call. The interview's overall
+        duration/time-remaining budget is NOT frozen by this — it keeps
+        counting the same as real wall-clock time, so a pause counts
+        against the candidate's allotted interview time. Calling this while
+        already paused is a safe no-op, not an error.
+      parameters:
+        - name: interviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The `interviewId` field already present in every report you receive.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterviewControlRequest" }
+      responses:
+        "204":
+          description: Paused successfully.
+        "400":
+          description: interviewId is missing or not a valid UUID, or the request body is invalid JSON
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "401":
+          description: Missing or invalid X-Internal-Token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: Unrecognized interviewId, or one that isn't yours — treated identically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+  /internal/handoff/interviews/{interviewId}/resume:
+    post:
+      summary: Reverse a pause, letting the AI interviewer continue
+      operationId: resumeHandoffInterview
+      description: >
+        Reverses `/pause` above. Calling this while not currently paused is
+        a safe no-op, not an error.
+      parameters:
+        - name: interviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The `interviewId` field already present in every report you receive.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InterviewControlRequest" }
+      responses:
+        "204":
+          description: Resumed successfully.
+        "400":
+          description: interviewId is missing or not a valid UUID, or the request body is invalid JSON
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "401":
+          description: Missing or invalid X-Internal-Token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: Unrecognized interviewId, or one that isn't yours — treated identically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+  /handoff/{token}:
+    get:
+      summary: Open the interview (the candidate's browser calls this, not you)
+      operationId: openHandoffPage
+      description: >
+        This is the link you send the candidate — `interviewUrl` from
+        /internal/handoff. You never call it yourself; the candidate's
+        browser opens it directly from whatever channel you delivered it
+        through. It takes care of everything (identity, setup, entering the
+        interview) and lands the candidate in the live interview. Opening it
+        again with the same token before it expires resumes the same
+        session rather than starting a new one.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+          description: The token embedded in the interviewUrl you received.
+      security: []
+      responses:
+        "302":
+          description: Candidate is redirected into the live interview.
+        "404":
+          description: Link has expired or the token is unrecognized.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "500":
+          description: Internal failure resolving or re-opening the session — safe to ask the candidate to retry the link.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+  /handoff/{token}/open:
+    post:
+      summary: Open the interview headlessly (call this from your own frontend, if embedding)
+      operationId: openHandoffSession
+      description: >
+        The embedded-flow counterpart to GET /handoff/{token}: same token,
+        same first-open-vs-reopen semantics, but returns a bearer token as
+        JSON instead of redirecting the browser. Call this from your own
+        frontend (cross-origin — your frontend's origin must be registered
+        with us first, same as your webhook URL / returnUrl host) if you
+        want to run the interview inside your own UI rather than sending the
+        candidate to a Hiresense-hosted page. Use the returned
+        candidateToken as `Authorization: Bearer <candidateToken>` on the
+        candidate-api calls that drive the interview (start/device-check/
+        end/feedback) and to join the LiveKit room directly from your
+        frontend — see the "Embedding on your own frontend" section of the
+        integration guide for the full call sequence.
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+          description: The token embedded in the interviewUrl you received.
+      security: []
+      responses:
+        "200":
+          description: Session resolved — candidate identity + interview ready to drive
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HandoffOpenResponse" }
+        "404":
+          description: Link has expired or the token is unrecognized.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "500":
+          description: Internal failure resolving or re-opening the session, or signing the guest token.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+  /candidate-api/v1/interviews/{interviewId}/start:
+    post:
+      summary: Start the interview and provision the LiveKit room (embedded flow only)
+      operationId: startInterview
+      description: >
+        Provisions the LiveKit room and dispatches the AI interviewer. Call
+        once per session — safe to retry if it fails; calling again on an
+        already-started interview reuses the same room rather than creating
+        a new one.
+      security:
+        - CandidateToken: []
+      parameters:
+        - $ref: "#/components/parameters/InterviewId"
+      responses:
+        "200":
+          description: Room provisioned, ready to join with the LiveKit SDK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StartInterviewResponse" }
+        "401":
+          description: Missing, expired, or invalid candidateToken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: interviewId doesn't belong to this candidateToken
+        "409":
+          description: Interview already completed/feedback_pending/feedback_ready — don't retry, route to the feedback screen instead.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvalidTransitionResponse" }
+        "503":
+          description: AI interviewer couldn't be dispatched (rare — usually a cold-start race). Retry after retry_action.after_ms.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterviewerUnavailableResponse" }
+  /candidate-api/v1/interviews/{interviewId}/device-check:
+    post:
+      summary: Record that the candidate passed a mic/camera check (embedded flow only, optional)
+      operationId: recordDeviceCheck
+      description: Purely informational — doesn't gate anything else in the flow.
+      security:
+        - CandidateToken: []
+      parameters:
+        - $ref: "#/components/parameters/InterviewId"
+      responses:
+        "200":
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterviewStateResponse" }
+        "401":
+          description: Missing, expired, or invalid candidateToken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: interviewId doesn't belong to this candidateToken
+  /candidate-api/v1/interviews/{interviewId}/end:
+    post:
+      summary: End the interview and trigger scoring (embedded flow only)
+      operationId: endInterview
+      description: >
+        Safe to call unconditionally when the candidate clicks "finish" —
+        calling it twice returns already_ended: true (still 200) rather than
+        erroring, so you don't need to track local state to avoid a
+        double-call.
+      security:
+        - CandidateToken: []
+      parameters:
+        - $ref: "#/components/parameters/InterviewId"
+      responses:
+        "200":
+          description: Interview completed (or already was — see already_ended)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InterviewStateResponse" }
+        "401":
+          description: Missing, expired, or invalid candidateToken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: interviewId doesn't belong to this candidateToken
+        "409":
+          description: Called before the interview reached in_progress.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InvalidTransitionResponse" }
+  /candidate-api/v1/interviews/{interviewId}/feedback:
+    get:
+      summary: Poll for the scored report (embedded flow only, alternative to the webhook)
+      operationId: getInterviewFeedback
+      description: >
+        Use this if you want the report in your own UI instead of (or in
+        addition to) waiting on the webhook. The webhook remains
+        authoritative either way.
+      security:
+        - CandidateToken: []
+      parameters:
+        - $ref: "#/components/parameters/InterviewId"
+      responses:
+        "200":
+          description: >
+            Report ready. Unlike the webhook/GET .../report, this is not
+            wrapped in an envelope — the report's own fields (and
+            reportV2, when present) are at the top level of this response,
+            since there's no externalCandidateId/externalJobId to carry
+            here (the interviewId + candidateToken already scope this call
+            to one interview).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/FeedbackReport"
+                  - type: object
+                    properties:
+                      reportV2:
+                        $ref: "#/components/schemas/InterviewReportV2"
+        "401":
+          description: Missing, expired, or invalid candidateToken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: Not ready yet, or interviewId doesn't belong to this candidateToken. Treat both as "keep polling" unless you've independently confirmed ownership.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FeedbackNotReadyResponse" }
+  /api/interviewhandoff/livekit-interview/conversation/{interviewId}:
+    get:
+      summary: One-time backfill of the transcript so far (embedded flow only)
+      operationId: getConversationBackfill
+      description: >
+        Call this once when you connect, to render everything said before
+        your /ws/transcript subscription opened, then append live turns from
+        the WebSocket stream. Not under /candidate-api — no candidateToken
+        check; knowing interviewId is the only credential this call needs
+        (interviewId is an unguessable UUID). Same trust model as
+        /ws/transcript below.
+      security: []
+      parameters:
+        - name: interviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Transcript so far
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConversationResponse" }
+        "404":
+          description: No conversation started yet for this interview.
+  /ws/transcript/{interviewId}:
+    get:
+      summary: Live transcript stream (embedded flow only)
+      operationId: streamTranscript
+      description: >
+        WebSocket upgrade (ws:// or wss://, same host) — not a normal REST
+        call, documented here for completeness. Connect after the backfill
+        call above; each new turn is pushed as a text frame as soon as it's
+        saved. Same trust model as the backfill call — no auth header, no
+        candidateToken check, interviewId alone is the credential.
+      security: []
+      parameters:
+        - name: interviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "101":
+          description: >
+            Switching Protocols — connection upgraded to WebSocket. Each
+            subsequent frame is a TranscriptMessage, sent as-is, one per
+            turn.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TranscriptMessage" }
+  /candidate-api/v1/interviews/{interviewId}/recording/playback:
+    get:
+      summary: Get a playback URL for the full interview recording (embedded flow only)
+      operationId: getRecordingPlayback
+      description: >
+        Returns a short-lived URL for the server-side recording — candidate
+        audio/video (if you published a camera track — see "Embedding on
+        your own frontend" in the integration guide) **plus the AI
+        interviewer's voice** mixed in. Distinct from Hiresense's own
+        internal proctoring recording (candidate-only, never exposed to you)
+        — see "Proctoring recording" in the integration guide. Only relevant
+        if you're driving the interview from your own frontend; call it any
+        time after the interview ends. The URL expires in 1 hour — re-fetch
+        rather than cache it.
+      security:
+        - CandidateToken: []
+      parameters:
+        - $ref: "#/components/parameters/InterviewId"
+      responses:
+        "200":
+          description: Playback URL available
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordingPlaybackResponse" }
+        "401":
+          description: Missing, expired, or invalid candidateToken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: >
+            No recording to serve — either the interview hasn't finished
+            processing yet, no video was ever published (audio-only
+            interview), or interviewId doesn't belong to this candidateToken.
+components:
+  parameters:
+    InterviewId:
+      name: interviewId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+      description: The interviewId returned from POST {interviewUrl}/open.
+  securitySchemes:
+    CandidateToken:
+      type: http
+      scheme: bearer
+      description: >
+        The candidateToken returned from POST /handoff/{token}/open. Used
+        on every candidate-api call for the interview it identifies —
+        including this one — not the X-Internal-Token used everywhere else
+        in this spec.
+    InternalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: >
+        A secret we issue you out of band. This is your entire identity on
+        every call — there is no separate "partner" field anywhere; whatever
+        this token identifies you as is whose data you create and read.
+  schemas:
+    CreateHandoffRequest:
+      type: object
+      required: [externalCandidateId, externalJobId, jd]
+      properties:
+        externalCandidateId:
+          type: string
+          description: Your own identifier for the candidate. Used to match this session back to your system, including on the webhook.
+        externalJobId:
+          type: string
+          description: Your own identifier for the job. Used to match this session back to your system, including on the webhook.
+        jd:
+          type: string
+          description: >
+            The job description, as plain text. Always required, even when
+            parsedJd is also sent — this is kept as the underlying job
+            description text (e.g. what's shown back to you). If you don't
+            send parsedJd, we parse this ourselves to run and score the
+            interview.
+        parsedJd:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: >
+            Optional. If you've already parsed this job description on your
+            side, send your structured version here and we'll use it
+            directly instead of re-parsing jd — useful if your own
+            extraction is more accurate than a generic re-parse would be.
+            Recognized fields (all optional, extra fields are ignored):
+            title, company, location, employment_type, experience_level,
+            work_mode, salary, summary, required_skills (array of short
+            strings), preferred_skills (array of short strings),
+            requirements (array of full sentences), responsibilities
+            (array of full sentences), qualifications (array of full
+            sentences), benefits (array of full sentences), key_highlights
+            (array of short strings), department, application_instructions.
+            Omit any field you don't have — a partial object is fine.
+        profile:
+          type: object
+          additionalProperties: true
+          nullable: true
+          description: >
+            Optional. The candidate's resume/profile data, stored as the
+            candidate's resume for this interview and used to drive
+            resume-based report sections (resume_claims_tested,
+            beyond_the_resume, in reportV2). We only pull readable text out
+            of a handful of recognized keys — description, raw_text, text,
+            content, summary (first one found, as a string) — anything else
+            is passed through as a raw JSON blob to the model as-is, which
+            still works but scores worse than clean prose. For best
+            results, put the resume as plain text under profile.text.
+        isPractice:
+          type: boolean
+          default: false
+          description: Optional, defaults to false. Marks this as a practice run rather than a real interview — only changes what the candidate sees on screen, does not change how the interview is scored or delivered to you.
+        returnUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: >
+            Optional. If set, the candidate sees a "Return to your app" button
+            on their results page that sends them back here. Must be an
+            https URL on a domain you've told us about in advance — an
+            unregistered domain is rejected. Leave it out (or send an empty
+            string) to skip the button.
+    CreateHandoffResponse:
+      type: object
+      properties:
+        interviewUrl:
+          type: string
+          format: uri
+          description: >
+            The link to send your candidate. Works once the candidate opens
+            it, and again on re-opens, until it expires 7 days after
+            creation. If it's lost, there's no way to recover it — just call
+            this endpoint again for the same candidate/job pair to get a new
+            one.
+        isResend:
+          type: boolean
+          description: True if this call reused an existing session for this candidate/job pair rather than starting a new one.
+        resendCount:
+          type: integer
+          description: How many times this session has been resent within the current 6-hour window.
+    ErrorResponse:
+      type: object
+      properties:
+        error: { type: string }
+    HandoffOpenResponse:
+      type: object
+      properties:
+        interviewId:
+          type: string
+          format: uuid
+          description: Pass this as {id} in the candidate-api interview calls.
+        candidateToken:
+          type: string
+          description: >
+            Bearer token identifying the candidate's guest session (7-day
+            TTL). Send it as `Authorization: Bearer <candidateToken>` on
+            every candidate-api call for this interview, and keep it out of
+            logs — treat it like any other access token.
+        returnUrl:
+          type: string
+          format: uri
+          description: >
+            Echoes the returnUrl you sent to /internal/handoff, if any. Not
+            typically shown in an embedded UI, since the candidate never
+            left your app. The key is omitted entirely (not sent as null)
+            when you didn't set returnUrl — check for its presence rather
+            than assuming it's always in the response.
+    JSONErrorResponse:
+      type: object
+      description: >
+        Generic error shape used by most non-2xx candidate-api and
+        /handoff/* responses. Note the key is `success`, not `ok` — a
+        different, unrelated pair of endpoints (start's 409/503, end's 409)
+        use `ok` instead; see InvalidTransitionResponse and
+        InterviewerUnavailableResponse. Don't assume one error shape for
+        every non-2xx response in this API.
+      properties:
+        success: { type: boolean, enum: [false] }
+        error: { type: string, example: authentication required }
+        message:
+          type: string
+          description: Only present on the X-Internal-Token check (401 on /internal/handoff) — duplicates error there.
+    Interview:
+      type: object
+      description: >
+        Interview state as returned inline by start/device-check/end. Field
+        set is the same across all three; livekit is only populated by
+        start.
+      properties:
+        interviewId: { type: string, format: uuid }
+        mode: { type: string, enum: [handoff], description: Always "handoff" for interviews created via /internal/handoff. }
+        isPractice: { type: boolean }
+        returnUrl: { type: string, format: uri, nullable: true }
+        status:
+          type: string
+          enum: [not_started, in_progress, completed, feedback_pending, feedback_ready, abandoned]
+        interviewType: { type: string, example: voice_call }
+        createdAt: { type: string, format: date-time, nullable: true }
+        startedAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        interviewRubric: { type: object, additionalProperties: true, nullable: true }
+        livekit:
+          type: object
+          nullable: true
+          description: Present only in the response from POST .../start.
+          properties:
+            room: { type: string }
+            token: { type: string }
+            url: { type: string, format: uri }
+        proctoring:
+          type: object
+          nullable: true
+          description: >
+            Present only in the response from POST .../start, and only once
+            incProc's real-time proctoring SDK integration is enabled for
+            this partner — absent means "not enabled for this interview,"
+            never an error; don't block the interview on it either way. See
+            the "incProc proctoring SDK" section of the integration guide
+            for how to use these fields.
+          properties:
+            sessionId: { type: string }
+            sessionToken: { type: string }
+            baseUrl: { type: string, format: uri }
+    StartInterviewResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        livekit_token:
+          type: string
+          description: Duplicate of interview.livekit.token, at the top level for convenience.
+        room_name: { type: string }
+        interview: { $ref: "#/components/schemas/Interview" }
+    InterviewStateResponse:
+      type: object
+      description: Shared response shape for device-check and end.
+      properties:
+        ok: { type: boolean }
+        state: { type: string, description: The interview's status after this call. }
+        interview: { $ref: "#/components/schemas/Interview" }
+        already_ended:
+          type: boolean
+          description: Only present (true) from end, when the interview was already completed — the call still succeeds, nothing was double-processed.
+    InvalidTransitionResponse:
+      type: object
+      properties:
+        ok: { type: boolean, enum: [false] }
+        error: { type: string, enum: [invalid_transition] }
+        current: { type: string, description: The interview's actual current status. }
+    InterviewerUnavailableResponse:
+      type: object
+      properties:
+        ok: { type: boolean, enum: [false] }
+        error: { type: string, enum: [interviewer_unavailable] }
+        message: { type: string }
+        retry_action:
+          type: object
+          properties:
+            kind: { type: string, enum: [retry_later] }
+            after_ms: { type: integer }
+    FeedbackNotReadyResponse:
+      type: object
+      properties:
+        ok: { type: boolean, enum: [false] }
+        ready: { type: boolean, enum: [false] }
+        current_state:
+          type: string
+          nullable: true
+          description: Omitted once the feedback row itself is what's missing rather than the interview status — still means "keep polling".
+        retry_action:
+          type: object
+          properties:
+            kind: { type: string, enum: [retry_later] }
+            after_ms: { type: integer }
+    ConversationResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        conversation:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            sessionToken: { type: string, description: Equal to interviewId. }
+            status: { type: string }
+            messageCount: { type: integer }
+            messages:
+              type: array
+              items: { $ref: "#/components/schemas/TranscriptMessage" }
+            metadata: { type: object, additionalProperties: true, nullable: true }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    TranscriptMessage:
+      type: object
+      description: One conversation turn — the shape of both a /conversation array entry and a single /ws/transcript frame.
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, description: 'Speaker role, e.g. "candidate" or "assistant".' }
+        content: { type: string }
+        timestamp: { type: string, format: date-time }
+    RecordingPlaybackResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        status:
+          type: string
+          enum: [completed, merge_failed]
+          description: merge_failed means the recording was captured but server-side processing failed — treat like no recording, nothing to retry on your end.
+        playbackUrl:
+          type: string
+          format: uri
+          description: Presigned URL, valid until expiresAt. Fetch a fresh one rather than caching past that.
+        duration:
+          type: integer
+          nullable: true
+          description: Recording duration in seconds, null if unknown.
+        expiresAt:
+          type: string
+          format: date-time
+    InterviewControlRequest:
+      type: object
+      properties:
+        message:
+          type: string
+          description: >
+            Optional. If set, the AI interviewer speaks it verbatim before
+            going silent (on pause) or before continuing (on resume). Omit
+            it and the pause/resume happens with no announcement to the
+            candidate.
+    WebhookReport:
+      type: object
+      description: >
+        This is what your webhook endpoint receives once a candidate's
+        interview is scored. We POST it to the URL you gave us when we set
+        up your integration. Delivery is at-least-once — if your endpoint
+        doesn't respond 2xx, or is unreachable, we retry — so handle it
+        idempotently, keyed on externalCandidateId + externalJobId. The
+        request carries header X-Internal-Token with the same secret you
+        use to call us — check it matches before trusting the payload.
+
+
+        **Delivery can happen more than once per interview.**
+        Video-analysis proctoring frequently completes after the report
+        itself and after the first delivery (confirmed on real traffic:
+        roughly half the time, by up to several minutes). When that
+        happens, we deliver a second time for the same interview, with
+        `proctoring_summary` (and each question's `proctoring` field) now
+        populated. Treat a second delivery for an interview you've already
+        received as an UPDATE to replace your stored copy with, not a
+        duplicate event to discard or a new interview to ingest again. `GET
+        /internal/handoff/report` always reflects the current state, so
+        re-pulling instead of relying solely on the push is also a safe
+        way to pick this up.
+      properties:
+        externalCandidateId:
+          type: string
+          description: The value you sent when you created this session.
+        externalJobId:
+          type: string
+          description: The value you sent when you created this session.
+        reportV2:
+          allOf:
+            - $ref: "#/components/schemas/InterviewReportV2"
+          description: >
+            The full recruiter-facing report — see InterviewReportV2. This
+            is the only report shape delivered on this endpoint and on
+            `GET /internal/handoff/report`; there is no separate legacy
+            `report` field on either. An interview whose report isn't on
+            this pipeline yet simply isn't delivered — see each endpoint's
+            own description for what "not ready" looks like there. Mutually
+            exclusive with `endedEarly` — exactly one of the two is present.
+        endedEarly:
+          type: boolean
+          description: >
+            Present and `true` instead of `reportV2` when the interview
+            ended before a 5-minute minimum — too little transcript for
+            any verdict to mean something, so no report was generated and
+            none ever will be. This is a terminal outcome, not a "not
+            ready yet": don't retry expecting `reportV2` to eventually
+            appear for this candidate/job pair. Mutually exclusive with
+            `reportV2`.
+        connectionEndReason:
+          type: string
+          enum: ["deliberate", "dropped", "timeout"]
+          description: >
+            How the candidate's connection actually ended, when known.
+            Unlike `endedEarly`, this arrives ALONGSIDE `reportV2` — the
+            interview had enough content for a real, scored report, it
+            just didn't end the way the interview plan intended.
+            `"deliberate"` means the candidate/AI finished normally (you
+            can usually ignore this value). `"dropped"` means the
+            connection was lost mid-interview — network issue, tab close,
+            or a crash on our side — and the candidate never explicitly
+            finished. `"timeout"` means the interview hit its maximum
+            allowed duration with no explicit end. Omitted entirely when
+            we don't have a reliable signal for this interview. Not
+            present on an `endedEarly` payload (nothing to report a
+            connection outcome for if no report was generated).
+        proctoring_summary:
+          type: object
+          nullable: true
+          description: >
+            Present only once video-analysis proctoring has completed for
+            this interview — absent, not null-with-a-placeholder, when it
+            hasn't finished yet. Its absence on an early delivery does not
+            mean proctoring failed or was skipped; it can arrive on a
+            LATER delivery of the SAME interview (externalCandidateId +
+            externalJobId pair) — see "Delivery can happen more than once"
+            in this schema's own description above. Computed entirely
+            from platform-side proctoring events (attention/look-away
+            tracking, device/face detection), never derived from the
+            transcript and never asked of any AI model — deterministic
+            thresholds only.
+          properties:
+            status:
+              type: string
+              enum: [clean, caution, flagged, unverified]
+              description: >
+                The highest-severity status across every answer. `clean`
+                means no caution/flagged event with full coverage.
+                `unverified` means proctoring data didn't cover some or
+                all of the interview, with no caution/flagged event
+                either.
+            non_clean_count:
+              type: integer
+              description: How many answers were NOT `clean`. 0 when status is `clean` (render no count in that case, per the report mockup).
+            total_count:
+              type: integer
+              description: Total answered questions this verdict was computed over.
+    FeedbackReport:
+      type: object
+      description: >
+        The scored interview report, in its original shape. Used only by
+        the embedded flow's own
+        `GET /candidate-api/v1/interviews/{interviewId}/feedback` — not by
+        the webhook or `GET /internal/handoff/report`, which are
+        `reportV2`-only (see WebhookReport). Every field here is duplicated
+        under both camelCase and snake_case keys with the same value — use
+        whichever reads better in your codebase. This list is not
+        exhaustive; treat any field you don't recognize as a
+        forward-compatible addition, not an error.
+      additionalProperties: true
+      properties:
+        overallScore:
+          type: number
+          nullable: true
+          description: Overall interview score, 0-100.
+        overall_score: { type: number, nullable: true }
+        recommendation:
+          type: string
+          nullable: true
+          enum: [strong_hire, hire, lean_hire, lean_no_hire, no_hire, reject]
+          description: Hiring recommendation. May be a notch lower than the raw interview quality would suggest if the interview was cut short (see coverage_percentage).
+        categories:
+          type: array
+          items: { type: object, additionalProperties: true }
+          description: Per-topic breakdown of the interview (e.g. problem solving, communication).
+        sections:
+          type: array
+          items: { type: object, additionalProperties: true }
+          description: Same content as categories, alternate key name.
+        problem_solving: { type: object, additionalProperties: true }
+        domain_knowledge: { type: object, additionalProperties: true }
+        communication: { type: object, additionalProperties: true }
+        behavioral_cultural_alignment: { type: object, additionalProperties: true }
+        role_specific_competencies: { type: object, additionalProperties: true }
+        aiSummary:
+          type: string
+          nullable: true
+          description: Narrative summary of the candidate's performance.
+        ai_summary: { type: string, nullable: true }
+        strengths:
+          type: array
+          items: { type: string }
+        areasForImprovement:
+          type: array
+          items: { type: string }
+        coverage_percentage:
+          type: number
+          nullable: true
+          description: How much of the planned interview the candidate actually completed, 0-100. A low value means the interview was cut short, and the score/recommendation above already account for that.
+        coverage_note:
+          type: string
+          nullable: true
+          description: Human-readable explanation when coverage was incomplete.
+        candidateName:
+          type: string
+          description: Best-effort display name. Will read "Unknown Candidate" if we have nothing better — expected, since your candidates never create a Hiresense account.
+        jobTitle:
+          type: string
+          description: Best-effort job title extracted from the job description you sent. Will read "Unknown Position" if extraction failed.
+    ClipRefV2:
+      type: object
+      description: >
+        Points at a playable answer clip. `index` is what you use — pass it
+        back to GET /internal/handoff/interviews/{interviewId}/clips and
+        match on the `index` values that endpoint returns. `message_id` is
+        internal; it isn't something you call anything with directly.
+      properties:
+        message_id: { type: string }
+        index: { type: integer }
+    QuoteRefV2:
+      type: object
+      description: >
+        A verbatim quote from the transcript, always paired with the
+        judgement it backs. `clip`, when present, is this quote's playable
+        answer clip — absent means we couldn't resolve one (a genuinely
+        untimestamped or unmatched turn), not that one exists and failed.
+      properties:
+        text: { type: string, description: "Verbatim, never edited — an excerpt is always a real substring, never a paraphrase." }
+        turn_ref: { type: string, description: Speaker label and timestamp as they appeared in the transcript. }
+        label: { type: string, description: "Short (4-8 word) handle for the quote, for use as a UI chip." }
+        clip:
+          $ref: "#/components/schemas/ClipRefV2"
+    QuoteCitationV2:
+      type: object
+      description: >
+        A lighter citation used only inside resume_claims_tested — label
+        and timestamp, not the quote text itself. Does not carry a `clip`
+        field: this shape isn't resolved to an answer clip today.
+      properties:
+        label: { type: string }
+        timestamp: { type: string, nullable: true, description: "mm:ss, or null if the transcript carried none." }
+    InterviewReportV2:
+      type: object
+      description: >
+        The full recruiter-facing report. Eight top-level keys, always in
+        this order, always all present (an empty section still appears,
+        with its own empty-state note explaining there's nothing to show
+        rather than the key being missing). Built directly from — and
+        intended to be rendered in the same layout as — the "AI Interview -
+        Report" mockup you were given: verdict is the top hiring-recommendation
+        tile, scored_dimensions the dimension breakdown, per_question_breakdown
+        the per-question detail, and so on down to next_steps.
+      properties:
+        verdict:
+          type: object
+          properties:
+            candidate_label: { type: string }
+            job_title: { type: string }
+            interview_date: { type: string, format: date }
+            headline_verdict: { type: string, description: "One sentence, the evidence that decides the recommendation." }
+            recommendation:
+              type: object
+              properties:
+                value: { type: string, enum: [STRONG_YES, YES, MAYBE, NO] }
+                phrase: { type: string, enum: [Advance, Advance with validation, Additional assessment before deciding, Do not advance] }
+                badge_colour: { type: string, enum: [Green, Amber, Red] }
+            interview_performance:
+              type: object
+              properties:
+                score: { type: number, description: 0-100. }
+                band: { type: string, enum: [HIGH_FIT, THRESHOLD_FIT, MEDIUM_FIT, LOW_FIT] }
+                band_phrase: { type: string, enum: [High fit, Threshold fit, Medium fit, Low fit] }
+            duration_minutes: { type: integer }
+            exchanges_count: { type: integer }
+            verdict_points:
+              type: array
+              items: { type: string }
+              description: Up to 3 points — what was proven, what stayed unproven, what a next round is for.
+          description: >
+            Carries no quote field and no red-flag field/count — red flags
+            are an integrity/behavior concern folded into the recommendation
+            already, not a separate list here. Also carries no proctoring
+            or status field here — the report-level verdict is
+            `WebhookReport.proctoring_summary` (a sibling of `reportV2`,
+            not nested inside it), attached from platform proctoring
+            events after this report is generated, never derived from the
+            transcript or asked of any AI model. Per-question proctoring
+            status lives on each `per_question_breakdown[]` entry instead
+            — see its own `proctoring` field below.
+        scored_dimensions:
+          type: object
+          properties:
+            overall:
+              type: object
+              properties:
+                score: { type: number }
+                band: { type: string, enum: [STRONG, ACCEPTABLE, GAP] }
+                band_phrase: { type: string, enum: [Strong, Acceptable, Gap] }
+            weights_note: { type: string }
+            dimensions:
+              type: array
+              description: >
+                Always 5 entries: technical_knowledge, problem_solving,
+                communication, professional_competencies, role_match — in
+                that order. communication and professional_competencies
+                additionally carry sub_components (no numeric score, just
+                a signal); role_match additionally carries groups instead
+                of a single one_line_read breakdown.
+              items:
+                type: object
+                properties:
+                  key: { type: string, enum: [technical_knowledge, problem_solving, communication, professional_competencies, role_match] }
+                  name: { type: string }
+                  score: { type: number, nullable: true, description: "null when band is NOT_ASSESSED." }
+                  band: { type: string, enum: [STRONG, ACCEPTABLE, GAP, NOT_ASSESSED] }
+                  band_phrase: { type: string, enum: [Strong, Acceptable, Gap, Not assessed] }
+                  weight_percent: { type: integer }
+                  one_line_read: { type: string, nullable: true, description: "What the score means in plain language; null when band is NOT_ASSESSED." }
+                  sub_components:
+                    type: array
+                    description: communication and professional_competencies only.
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        signal: { type: string, enum: [ADVANTAGE, NEUTRAL, DRAG, NOT_ASSESSED] }
+                        signal_phrase: { type: string, enum: [Advantage, Neutral, Drag, Not assessed] }
+                  groups:
+                    type: object
+                    description: role_match only — always all four keys, each an array, empty where there's nothing in it.
+                    properties:
+                      ready: { type: array, items: { type: object, properties: { requirement: { type: string }, evidence_type: { type: string, enum: [DIRECT, INDIRECT] } } } }
+                      needs_onboarding: { type: array, items: { type: object } }
+                      needs_development: { type: array, items: { type: object } }
+                      not_ready: { type: array, items: { type: object } }
+        per_question_breakdown:
+          type: array
+          description: The audit trail — one entry per exchange in the interview, in order. This is what makes the score above it mean something.
+          items:
+            type: object
+            properties:
+              sequence: { type: integer }
+              topic: { type: string }
+              question:
+                type: object
+                properties:
+                  text: { type: string }
+                  reconstructed: { type: boolean, description: True when the question was embedded in a monologue and had to be reconstructed rather than quoted verbatim. }
+                  reconstructed_note: { type: string, nullable: true }
+              testing: { type: string, description: "One line, what the question was testing." }
+              benchmark:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    point: { type: string }
+                    core: { type: boolean, description: "True for a CORE benchmark point, false for SUPPORTING." }
+                    outcome: { type: string, enum: [Covered, Missed] }
+              answer:
+                allOf: [{ $ref: "#/components/schemas/QuoteRefV2" }]
+                description: The candidate's own words, assembled verbatim — never a summary or paraphrase. Carries `clip` when we could resolve one.
+              rating:
+                type: object
+                properties:
+                  score: { type: number, description: 0-10. }
+                  band: { type: string, nullable: true, enum: [STRONG, WEAK, MISSED], description: "Only set at the extremes; null for the ordinary middle case." }
+                  justification_points:
+                    type: array
+                    items: { type: string }
+              proctoring:
+                type: object
+                nullable: true
+                description: >
+                  This question's own Clean/Caution/Flagged/Unverified
+                  status, from platform proctoring events over this
+                  answer's time window. Absent under the same conditions
+                  as `WebhookReport.proctoring_summary` (proctoring hasn't
+                  completed yet for this interview) — its presence/absence
+                  always matches that top-level field's.
+                properties:
+                  status:
+                    type: string
+                    enum: [clean, caution, flagged, unverified]
+                  summary:
+                    type: string
+                    description: >
+                      One composed sentence covering this answer's
+                      duration, recorded time away from the screen, and
+                      any relevant findings (e.g. "120 second answer,
+                      looked away for 18 seconds, mobile phone detected").
+                      Deterministic, not LLM-generated — safe to render
+                      as-is.
+        where_strong:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+                properties:
+                  rank: { type: integer }
+                  claim: { type: string }
+                  evidence:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        in_answer_to: { type: string, description: The topic of the exchange this quote came from. }
+                        quote: { $ref: "#/components/schemas/QuoteRefV2" }
+                  why_it_matters_points:
+                    type: array
+                    items: { type: string }
+            empty_note: { type: string, nullable: true, description: Set only when items is empty. }
+        where_weak_or_untested:
+          type: object
+          description: Three fixed groups, evidence-present to no-evidence, always in this order.
+          properties:
+            weak_on_evidence:
+              type: object
+              description: Touched, insufficient depth, or positive evidence they can't do it.
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      claim: { type: string }
+                      quote: { $ref: "#/components/schemas/QuoteRefV2" }
+                      impact_points: { type: array, items: { type: string } }
+                empty_note: { type: string, nullable: true }
+            gaps_named:
+              type: object
+              description: The candidate's own statement of a limit.
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      claim: { type: string }
+                      quote: { $ref: "#/components/schemas/QuoteRefV2" }
+                      impact_points: { type: array, items: { type: string } }
+                empty_note: { type: string, nullable: true }
+            not_tested:
+              type: object
+              description: The interview never went there — no quote exists, so these carry an evidence_note instead.
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      claim: { type: string }
+                      evidence_note: { type: string, description: What was searched and where the silence was. }
+                      impact_points: { type: array, items: { type: string } }
+                empty_note: { type: string, nullable: true }
+            all_empty_note: { type: string, nullable: true, description: Set only when all three groups are empty. }
+        resume_claims_tested:
+          type: object
+          description: >
+            Four fixed blocks. Every material resume claim sits in exactly
+            one of corroborated / not_covered / contradictions;
+            beyond_the_resume holds no resume claim so it's outside that
+            rule. Quote citations here are label+timestamp only (see
+            QuoteCitationV2) — they don't carry a clip reference.
+          properties:
+            corroborated:
+              type: object
+              properties:
+                count: { type: integer }
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      resume_claim: { type: string }
+                      what_the_interview_showed: { type: string }
+                      quotes: { type: array, items: { $ref: "#/components/schemas/QuoteCitationV2" } }
+            beyond_the_resume:
+              type: object
+              properties:
+                count: { type: integer }
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      what_the_interview_revealed: { type: string }
+                      why_the_resume_missed_it: { type: string }
+                      quotes: { type: array, items: { $ref: "#/components/schemas/QuoteCitationV2" } }
+            not_covered:
+              type: object
+              description: Rows here carry no quotes key at all — nothing was asked.
+              properties:
+                count: { type: integer }
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      resume_claim: { type: string }
+                      why_it_matters: { type: string }
+                      how_to_verify: { type: string }
+            contradictions:
+              type: object
+              properties:
+                count: { type: integer }
+                rows:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      resume_claim: { type: string }
+                      conflict_type_phrase: { type: string, enum: [Not supported by the interview, Described differently in the interview] }
+                      nature_of_conflict: { type: string }
+                      quotes: { type: array, items: { $ref: "#/components/schemas/QuoteCitationV2" } }
+            all_empty_note: { type: string, nullable: true, description: Set only when every block's rows array is empty. }
+        risk_assessment:
+          type: object
+          description: >
+            Four fixed axes, always in this exact order, so two candidates
+            for the same role are readable side by side. Not the inverse of
+            the score — a strong performer can carry real retention risk.
+          properties:
+            performance: { $ref: "#/components/schemas/RiskAxisV2" }
+            team_integration: { $ref: "#/components/schemas/RiskAxisV2" }
+            experience_inflation: { $ref: "#/components/schemas/RiskAxisV2" }
+            retention: { $ref: "#/components/schemas/RiskAxisV2" }
+        next_steps:
+          type: object
+          description: What the recruiter does next. Carries no reason list — the reasons for decision are verdict.verdict_points, above.
+          properties:
+            decision:
+              type: object
+              properties:
+                value: { type: string, enum: [ADVANCE, ADDITIONAL_ASSESSMENT, REJECT] }
+                phrase: { type: string, enum: [Advance, Additional assessment, Reject] }
+            recommended_actions:
+              type: array
+              items:
+                type: object
+                properties:
+                  action: { type: string, description: "Imperative, six words maximum." }
+                  detail: { type: string }
+            validation_before_offer:
+              type: array
+              description: Ordered by priority, highest first — what must be settled before this person is hired.
+              items:
+                type: object
+                properties:
+                  what: { type: string }
+                  why: { type: string }
+                  route: { type: string, enum: [NEXT_INTERVIEW, REFERENCE_CHECK, TAKE_HOME] }
+                  route_phrase: { type: string, enum: [Next interview, Reference check, Take-home] }
+                  priority: { type: string, enum: [HIGH, MEDIUM, LOW] }
+    RiskAxisV2:
+      type: object
+      properties:
+        level: { type: string, enum: [LOW, MEDIUM, HIGH] }
+        basis: { type: string, description: One line naming the evidence — never left as a bare level with nothing backing it. }
