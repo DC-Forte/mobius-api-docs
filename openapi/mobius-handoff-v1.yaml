@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Hiresense Handoff API
-  version: "1.3.0"
+  version: "1.4.0"
   license:
     name: Proprietary
     url: https://hiresense-api.dc-forte.com
@@ -388,6 +388,54 @@ paths:
               schema: { $ref: "#/components/schemas/JSONErrorResponse" }
         "404":
           description: Unrecognized interviewId, or one that isn't yours — treated identically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+  /internal/handoff/interviews/{interviewId}/regenerate-report:
+    post:
+      summary: Retry report generation after a failure
+      operationId: regenerateHandoffReport
+      description: >
+        For the rare case where report generation itself failed (a
+        transient LLM error, timeout, etc.) — nothing on our side retries
+        that automatically, so without this endpoint that interview's
+        report would be stuck forever. Refuses to run for a report that
+        already completed, is still generating, or was gated out by the
+        5-minute minimum (`endedEarly`/`insufficient_data`) — that last
+        case is a permanent, by-design outcome, not a failure to retry.
+      parameters:
+        - name: interviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: The `interviewId` field already present in every report you receive.
+      responses:
+        "202":
+          description: Report generation restarted; poll /report or wait for the webhook.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  interviewId: { type: string, format: uuid }
+                  status: { type: string, enum: [pending] }
+        "400":
+          description: interviewId is missing or not a valid UUID
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "401":
+          description: Missing or invalid X-Internal-Token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "404":
+          description: Unrecognized interviewId, one that isn't yours, or one with no feedback record yet — treated identically.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JSONErrorResponse" }
+        "409":
+          description: Report already completed, still generating, or gated by the 5-minute minimum — not a failure to retry.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/JSONErrorResponse" }

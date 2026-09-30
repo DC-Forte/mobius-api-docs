@@ -723,6 +723,35 @@ it keeps counting the same as real wall-clock time, so a pause counts against th
 allotted interview time. Don't leave an interview paused indefinitely if the candidate is still
 on the call waiting.
 
+### Retrying a failed report — `POST /internal/handoff/interviews/{interviewId}/regenerate-report`
+
+For the rare case where report generation itself failed (a transient LLM error, timeout, etc.) —
+nothing on our side retries that automatically, so without this endpoint that interview's report
+would be stuck forever. Same `X-Internal-Token` auth and partner-ownership rules as `/clips`
+above.
+
+**Request:** `POST /internal/handoff/interviews/{interviewId}/regenerate-report`, no body.
+
+**Response `202`:**
+
+```json
+{ "interviewId": "8f2c1e40-...", "status": "pending" }
+```
+
+Report generation restarts asynchronously — poll `GET /internal/handoff/report` or wait for the
+webhook, same as after the interview first completed.
+
+**`409`** if the report isn't actually in a failed state:
+
+- It already generated successfully — this endpoint never clobbers a working report.
+- It's still generating (`pending`) — nothing to retry yet.
+- The interview ended before the 5-minute minimum (`endedEarly`/`insufficient_data`, see the pull
+  endpoint above) — that's a permanent, by-design outcome, not a failure. This endpoint refuses
+  to bypass that gate.
+
+**`404`** covers an unrecognized `interviewId`, one that isn't yours, or one with no feedback
+record at all yet (the interview never got far enough to have one) — all treated identically.
+
 ### `report` shape (embedded flow's `GET .../feedback` poll only)
 
 The webhook and `GET /internal/handoff/report` are `reportV2`-only (above) — this legacy flat

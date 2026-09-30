@@ -9,6 +9,16 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## 1.4.0 — 2026-09-30
+
+### Added
+
+- `POST /internal/handoff/interviews/{interviewId}/regenerate-report` lets you retry report
+  generation after it failed on our side (transient LLM error, timeout, etc.) — nothing
+  previously retried that automatically. Returns `202` and restarts generation asynchronously;
+  `409` if the report already completed, is still generating, or was gated out by the 5-minute
+  minimum (that last case is permanent by design, not a failure to retry).
+
 ## 1.3.0 — 2026-09-29
 
 ### Added
