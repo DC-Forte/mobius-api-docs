@@ -677,6 +677,7 @@ always fast and never fails because incProc is slow or unreachable.
 ```json
 {
   "interviewId": "8f2c1e40-...",
+  "status": "in_progress",
   "events": [
     { "start": "2026-09-21T11:39:23Z", "end": "2026-09-21T11:39:36Z", "duration_sec": 13, "description": "Interview tab no longer visible", "source": "browser_session" },
     { "start": "2026-09-21T11:41:31Z", "end": null, "duration_sec": null, "description": "Exited fullscreen mode", "source": "browser_session" },
@@ -685,6 +686,13 @@ always fast and never fails because incProc is slow or unreachable.
 }
 ```
 
+- `status` is one of `not_started` (no proctoring session minted yet for this interview — e.g.
+  proctoring disabled, or the candidate hasn't reached `/start` yet), `in_progress` (session
+  minted and still within its real incProc-granted TTL), `ended` (session's TTL has passed but
+  the post-call video hasn't been submitted for analysis yet), `analyzing` (video submitted,
+  incProc's completion webhook hasn't landed), `completed`, or `failed`. Like `events`, it's
+  derived entirely from what Hiresense already has persisted — not a live incProc call, so it
+  reflects "session alive" rather than a real-time SDK heartbeat.
 - An empty `events` array is a valid response — proctoring wasn't enabled for this interview, or
   no violations were detected — not a failure.
 - `end`/`duration_sec` are `null` for a point-in-time event (e.g. exiting fullscreen has no

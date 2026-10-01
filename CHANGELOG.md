@@ -9,6 +9,15 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## 1.4.1 — 2026-10-01
+
+### Added
+
+- `GET /internal/handoff/interviews/{interviewId}/proctoring-log` response now includes a
+  top-level `status` field (`not_started` / `in_progress` / `ended` / `analyzing` / `completed` /
+  `failed`) — a live-ish proctoring status for your backend to poll, without needing to run the
+  incProc SDK client-side. Derived from Hiresense's own persisted state, not a live incProc call.
+
 ## 1.4.0 — 2026-09-30
 
 ### Added

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Hiresense Handoff API
-  version: "1.4.0"
+  version: "1.4.1"
   license:
     name: Proprietary
     url: https://hiresense-api.dc-forte.com
@@ -287,6 +287,17 @@ paths:
                 type: object
                 properties:
                   interviewId: { type: string, format: uuid }
+                  status:
+                    type: string
+                    enum: [not_started, in_progress, ended, analyzing, completed, failed]
+                    description: >
+                      Derived from Hiresense's own persisted state, not a live
+                      incProc call. not_started: no proctoring session minted
+                      yet. in_progress: session minted, still within its real
+                      incProc-granted TTL. ended: TTL passed, video not
+                      submitted for analysis yet. analyzing: video submitted,
+                      incProc's completion webhook hasn't landed. completed /
+                      failed: final video-analysis outcome.
                   events:
                     type: array
                     items:
