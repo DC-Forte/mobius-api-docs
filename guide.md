@@ -541,11 +541,17 @@ on a **later** delivery of the same interview (see "delivery can happen more tha
 status across every answer. `non_clean_count`/`total_count` are how many answers weren't
 `clean`, out of how many total (0 when `status` is `"clean"`). Each `per_question_breakdown[]`
 entry also carries its own `proctoring: { "status": "...", "summary": "..." }`, present/absent in
-lockstep with this top-level field. `summary` is one composed sentence covering that answer's
-duration, recorded time away from the screen, and any relevant findings — e.g. `"120 second
-answer, looked away for 18 seconds, mobile phone detected"`. Both fields are computed entirely
-from platform proctoring events (attention tracking, device/face detection) — never derived from
-the transcript, never asked of any AI model; `summary` is safe to render as-is.
+lockstep with this top-level field. `summary` names up to two of that answer's proctoring
+findings (ranked by severity, then a fixed tiebreak order), followed by `"+ N more"` if there
+are additional findings beyond the two named — e.g. `"Mobile phone detected, Candidate looking
+away from screen + 2 more"`, or `"Switched to another tab, Copied text"`, or `"No events
+recorded"` when nothing was found. **Changed in API version 1.4.2** — previously a
+duration-phrased sentence (`"120 second answer, looked away for 18 seconds, mobile phone
+detected"`); if you were pattern-matching on that old shape, update to the new one. Both fields
+are computed entirely from platform proctoring events (video analysis **and** the browser-SDK
+session's own tab-switch/window-blur/copy events, as of 1.4.2 — previously video-only) — never
+derived from the transcript, never asked of any AI model; `summary` is safe to render as-is
+either way.
 
 ```json
 {
@@ -863,7 +869,7 @@ already exists.
 | Build webhook receiver, verify `X-Internal-Token` on inbound POST | Before the first real candidate goes through an interview | The primary way a finished report reaches Mobius — `GET /internal/handoff/report` exists for pulling the same report on demand, but isn't a substitute for handling the push |
 | Make webhook handling idempotent on `externalCandidateId`+`externalJobId` | Same as above | Delivery is at-least-once; any non-2xx response triggers a retry, so duplicate deliveries are expected, not exceptional |
 | **NEW (2026-09-28) — treat a second delivery for an already-seen key as an UPDATE, not a dedup-and-discard** | Before the first real candidate whose proctoring completes after their report does (real traffic: roughly half of all interviews) | `proctoring_summary` frequently lands after the report itself and after the first webhook send — when it does, we deliver a **second** time for the same `externalCandidateId`+`externalJobId`, with `proctoring_summary` (and each `per_question_breakdown[]` entry's `proctoring` field) now populated. If your idempotency handling today means "process once, ignore repeats," it will silently drop this update — same key, genuinely different payload, needs to overwrite what you stored the first time |
-| Render `reportV2.proctoring_summary` (`status`, `non_clean_count`, `total_count`) and each `per_question_breakdown[]` entry's `proctoring.status` + `proctoring.summary` | Same webhook/report handling work, once the above lands | New optional fields — `status` is `clean`/`caution`/`flagged`/`unverified`; `summary` is one ready-to-render sentence ("120 second answer, looked away for 18 seconds, mobile phone detected") per answer. Absent (not null-with-a-placeholder) whenever proctoring hasn't completed yet for that delivery; presence/absence always matches between the top-level field and every per-question field together |
+| Render `reportV2.proctoring_summary` (`status`, `non_clean_count`, `total_count`) and each `per_question_breakdown[]` entry's `proctoring.status` + `proctoring.summary` | Same webhook/report handling work, once the above lands | New optional fields — `status` is `clean`/`caution`/`flagged`/`unverified`; `summary` names up to two findings ranked by severity (e.g. "Mobile phone detected, Candidate looking away from screen + 2 more", or "No events recorded") per answer — changed in 1.4.2 from an earlier duration-phrased sentence, don't pattern-match on the old shape. Absent (not null-with-a-placeholder) whenever proctoring hasn't completed yet for that delivery; presence/absence always matches between the top-level field and every per-question field together |
 | Respond `2xx` from the webhook handler on success | Same as above | Anything else counts as a failed attempt, retried on a 30s poll, capped at 5 attempts (~2.5 min) — after that delivery is abandoned permanently, not retried again on its own |
 | Store/expose parsed `report` to recruiter-facing UI | Same as above | `report` fields are duplicated camelCase/snake_case and include forward-compatible unknown fields — pick one casing convention and pass unknown fields through rather than dropping them |
 | Give Hiresense the webhook URL and frontend origin (CORS allowlist) | Before going live, one-time | Both are allowlisted on Hiresense's side — calls/deliveries are rejected until registered, no code-level workaround |

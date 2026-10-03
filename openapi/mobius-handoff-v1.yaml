@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Hiresense Handoff API
-  version: "1.4.1"
+  version: "1.4.2"
   license:
     name: Proprietary
     url: https://hiresense-api.dc-forte.com
@@ -1419,12 +1419,18 @@ components:
                   summary:
                     type: string
                     description: >
-                      One composed sentence covering this answer's
-                      duration, recorded time away from the screen, and
-                      any relevant findings (e.g. "120 second answer,
-                      looked away for 18 seconds, mobile phone detected").
-                      Deterministic, not LLM-generated — safe to render
-                      as-is.
+                      Names up to two of this answer's proctoring findings
+                      (e.g. "Multiple faces detected", "Switched to another
+                      tab", "Copied text"), ranked by severity then a fixed
+                      tiebreak order, followed by "+ N more" if there are
+                      additional findings beyond the two named — e.g.
+                      "Mobile phone detected, Candidate looking away from
+                      screen + 2 more". "No events recorded" when nothing
+                      was found. **Changed in 1.4.2** — previously a
+                      duration-phrased sentence ("120 second answer, looked
+                      away for 18 seconds, mobile phone detected"); do not
+                      pattern-match on that old shape. Deterministic, not
+                      LLM-generated — safe to render as-is either way.
         where_strong:
           type: object
           properties:

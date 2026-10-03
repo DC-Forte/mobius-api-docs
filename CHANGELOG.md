@@ -9,6 +9,22 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## 1.4.2 — 2026-10-03
+
+### Changed
+
+- `proctoring.summary` (both the top-level `reportV2.proctoring_summary` and each
+  `per_question_breakdown[]` entry's own `proctoring.summary`) is now a ranked list of named
+  findings (e.g. `"Mobile phone detected, Candidate looking away from screen + 2 more"`, or
+  `"No events recorded"`), not a duration-phrased sentence (`"120 second answer, looked away for
+  18 seconds, mobile phone detected"`). If you were pattern-matching on the old shape, update to
+  the new one — the field is still a plain string, safe to render as-is either way, just a
+  different string.
+- Proctoring status/summary now also incorporates the browser-SDK session's own events
+  (tab-switching, losing window focus, copying text) alongside video analysis — previously
+  video-only. No schema change; this can only make `status` more severe than before for an
+  interview where SDK data exists, never less.
+
 ## 1.4.1 — 2026-10-01
 
 ### Added
