@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Hiresense Handoff API
-  version: "1.4.2"
+  version: "1.4.3"
   license:
     name: Proprietary
     url: https://hiresense-api.dc-forte.com
@@ -152,7 +152,10 @@ paths:
             Not ready yet — covers every case indistinguishably: no handoff
             session for this pair, the candidate hasn't opened the
             interview link, the interview isn't completed, feedback hasn't
-            finished generating, or (rare) it finished on an older pipeline
+            finished generating, proctoring data (browser-session report and
+            video analysis) hasn't finished resolving yet (typically a few
+            minutes after the interview ends; held at most one hour, then
+            released regardless), or (rare) it finished on an older pipeline
             with no `reportV2` to deliver. Treat any 404 here the same as
             "keep waiting." An interview that ended before the 5-minute
             minimum is the one exception — see the 200 response above.

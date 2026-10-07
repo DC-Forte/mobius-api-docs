@@ -589,9 +589,9 @@ same pair you sent to `POST /internal/handoff` for this candidate/job.
 interview that ended before the 5-minute minimum (see above), `"endedEarly": true` in its
 place. A `200` with `endedEarly` is terminal, not "check back later" — that interview will
 never produce a report. `connectionEndReason` and `proctoring_summary` (see above) are included
-the same way when present, alongside `reportV2` — this endpoint always reflects current state,
-so it's the reliable way to pick up `proctoring_summary` once it lands, even if you don't want
-to handle a second webhook delivery.
+the same way when present, alongside `reportV2`. This endpoint only returns the report once
+proctoring has finished resolving (see `404` below), same as the webhook, so a `200` carries
+`proctoring_summary` whenever proctoring data exists — you don't need to re-pull to pick it up.
 
 ```json
 {
@@ -604,7 +604,10 @@ to handle a second webhook delivery.
 **`404`** (no body schema to rely on beyond `{"error": "<message>"}`) covers every "not ready
 yet" case — no handoff session for that candidate/job pair, the candidate hasn't opened the
 interview link yet, the interview isn't `completed`/`feedback_ready`, feedback hasn't finished
-generating, or (rare) it finished on an older pipeline with no `reportV2` to deliver. These
+generating, proctoring data (the browser-session report and the video analysis) hasn't finished
+resolving yet — typically a few minutes after the interview ends, held for at most one hour and
+then released regardless — or (rare) it finished on an older pipeline with no `reportV2` to
+deliver. These
 aren't distinguished from each other in the response — treat any `404` here the same way you'd
 treat "keep waiting for the webhook." (An `endedEarly` interview is the one exception: it's a
 `200`, not a `404` — see above.)

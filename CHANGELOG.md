@@ -9,6 +9,19 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## 1.4.3 — 2026-10-07
+
+### Changed
+
+- `GET /internal/handoff/report` now applies the same completeness gate as the webhook: it
+  returns `404` ("not ready") until proctoring has finished resolving — both the browser-session
+  report and the video analysis — instead of returning the report as soon as it is generated.
+  Previously a pull made right after generation got a report with no `proctoring_summary` and
+  no signal that it was incomplete. Proctoring typically resolves a few minutes after the
+  interview ends; the report is released regardless one hour after the interview ends. Treat
+  this `404` like every other "not ready" `404` on this endpoint — keep polling. No schema
+  change.
+
 ## 1.4.2 — 2026-10-03
 
 ### Changed
