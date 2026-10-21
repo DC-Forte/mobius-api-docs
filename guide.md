@@ -513,7 +513,8 @@ A body will always have exactly one of `reportV2` or `endedEarly`, never both.
 interview had enough content for a real, scored report, it just didn't end the way the
 interview plan intended. One of `"deliberate"` (candidate/AI finished normally — you can
 usually ignore this), `"dropped"` (connection lost mid-interview — network issue, tab close,
-or a crash on our side, candidate never explicitly finished), or `"timeout"` (hit the maximum
+or a crash on our side, and the candidate did not return within the 5m30s reconnect window
+or explicitly finish), or `"timeout"` (hit the maximum
 allowed duration with no explicit end). Omitted entirely when we don't have a reliable signal.
 Never present on an `endedEarly` payload.
 
@@ -525,6 +526,18 @@ Never present on an `endedEarly` payload.
   "connectionEndReason": "dropped"
 }
 ```
+
+**`candidateDisconnects` and `totalDisconnectedSeconds` are optional too** — present when the
+candidate left the interview room at any point (network drop, tab close or reload), omitted when
+they never did. `candidateDisconnects` is an ordered array, one entry per absence:
+`{ "leftAt": "<ISO-8601 UTC>", "returnedAt": "<ISO-8601 UTC>" | null, "durationSeconds": <number> }`.
+`returnedAt` is `null` when the candidate never came back before the interview closed (then
+`durationSeconds` runs until it closed). `totalDisconnectedSeconds` is the sum. While the
+candidate is away the AI interviewer holds — no nudges, no questions, interview time stops
+counting — for up to 5 minutes 30 seconds; coming back within that window resumes the same
+interview. Time away is **excluded** from the interview duration used for the 5-minute minimum
+and from the duration shown in the report. A candidate who never returns ends with
+`connectionEndReason: "dropped"`.
 
 **`endReason` is optional and echoes back whatever you sent as `end`'s `reason` field** (see
 `end`'s optional `reason` field, above) — the value you supplied, unchanged, e.g.

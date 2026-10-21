@@ -9,6 +9,24 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## 1.5.0 — 2026-10-21
+
+### Added
+
+- Webhook envelope: optional `candidateDisconnects` (array of `{ leftAt, returnedAt | null,
+  durationSeconds }`) and `totalDisconnectedSeconds` — every time the candidate left the
+  interview room mid-interview and for how long. Omitted when they never dropped.
+
+### Changed
+
+- A candidate who drops is now given up to 5 minutes 30 seconds (was 90 seconds) to reconnect to
+  the same interview; the AI interviewer holds meanwhile (no nudges, no questions, interview
+  time paused). One who never returns is reported as `connectionEndReason: "dropped"`.
+- Time the candidate spent disconnected is excluded from the interview duration used for the
+  5-minute minimum and from the report's duration, so a short interview can no longer clear the
+  minimum on the strength of a long absence.
+- `POST .../end` now also closes the interview room immediately.
+
 ## 1.4.3 — 2026-10-07
 
 ### Changed

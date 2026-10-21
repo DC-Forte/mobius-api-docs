@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Hiresense Handoff API
-  version: "1.4.3"
+  version: "1.5.0"
   license:
     name: Proprietary
     url: https://hiresense-api.dc-forte.com
@@ -1140,6 +1140,38 @@ components:
             we don't have a reliable signal for this interview. Not
             present on an `endedEarly` payload (nothing to report a
             connection outcome for if no report was generated).
+        candidateDisconnects:
+          type: array
+          description: >
+            Every time the candidate left the interview room mid-interview
+            (network drop, tab close/reload) and for how long, in order.
+            The interview is held while they are away (the AI interviewer
+            pauses, interview time stops counting) for up to 5 minutes 30
+            seconds; if they come back within that window the interview
+            continues. Omitted entirely when the candidate never dropped.
+            Time listed here is excluded from the interview duration used
+            for the 5-minute minimum.
+          items:
+            type: object
+            properties:
+              leftAt:
+                type: string
+                format: date-time
+              returnedAt:
+                type: string
+                format: date-time
+                nullable: true
+                description: >
+                  When the candidate came back. null when they never
+                  returned before the interview closed.
+              durationSeconds:
+                type: number
+                description: Seconds away. For an absence with null returnedAt, until the interview closed.
+        totalDisconnectedSeconds:
+          type: number
+          description: >
+            Sum of durationSeconds across candidateDisconnects. Present
+            together with candidateDisconnects, omitted with it.
         endReason:
           type: string
           enum: [user_initiated, camera_off, mic_off, connection_issue, timeout, other]
