@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Hiresense Handoff API
-  version: "1.5.0"
+  version: "1.5.1"
   license:
     name: Proprietary
     url: https://hiresense-api.dc-forte.com
@@ -673,12 +673,16 @@ paths:
               schema: { $ref: "#/components/schemas/FeedbackNotReadyResponse" }
   /api/interviewhandoff/livekit-interview/conversation/{interviewId}:
     get:
-      summary: One-time backfill of the transcript so far (embedded flow only)
+      summary: Backfill of the transcript so far (embedded flow only)
       operationId: getConversationBackfill
       description: >
-        Call this once when you connect, to render everything said before
-        your /ws/transcript subscription opened, then append live turns from
-        the WebSocket stream. Not under /candidate-api — no candidateToken
+        Call this when you open the transcript to render everything said
+        before your /ws/transcript subscription opened, **and again after
+        every WebSocket reconnect** (and about every 30 s while the interview
+        is live, as a safety net). The WebSocket stream is live-only and does
+        not replay turns saved while it was down, so this call is how a gap
+        is filled. It is idempotent: merge the result with what you already
+        have by TranscriptMessage.id. Not under /candidate-api — no candidateToken
         check; knowing interviewId is the only credential this call needs
         (interviewId is an unguessable UUID). Same trust model as
         /ws/transcript below.
@@ -702,9 +706,12 @@ paths:
       operationId: streamTranscript
       description: >
         WebSocket upgrade (ws:// or wss://, same host) — not a normal REST
-        call, documented here for completeness. Connect after the backfill
+        call, documented here for completeness. Open it before the backfill
         call above; each new turn is pushed as a text frame as soon as it's
-        saved. Same trust model as the backfill call — no auth header, no
+        saved. Live only: a turn saved while your socket was down is not
+        replayed on reconnect, so reconnect with backoff and run the backfill
+        again after every reconnect. The server sends periodic ping frames;
+        browsers answer them automatically. Same trust model as the backfill call — no auth header, no
         candidateToken check, interviewId alone is the credential.
       security: []
       parameters:
@@ -1027,7 +1034,10 @@ components:
       description: One conversation turn — the shape of both a /conversation array entry and a single /ws/transcript frame.
       properties:
         id: { type: string, format: uuid }
-        type: { type: string, description: 'Speaker role, e.g. "candidate" or "assistant".' }
+        type:
+          type: string
+          enum: [user, ai, system]
+          description: 'Speaker role: "user" is the candidate, "ai" is the interviewer, "system" is a control note.'
         content: { type: string }
         timestamp: { type: string, format: date-time }
     RecordingPlaybackResponse:

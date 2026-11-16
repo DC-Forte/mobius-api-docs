@@ -209,8 +209,8 @@ LiveKit) with header `Authorization: Bearer <candidateToken>`:
 | `POST /candidate-api/v1/interviews/{interviewId}/end` | Ends the interview once the candidate is done. Triggers scoring. Optional JSON body `{ "reason": "<end_reason>" }` — see below. |
 | `GET /candidate-api/v1/interviews/{interviewId}/feedback` | Poll this if you want the report in your own UI instead of (or in addition to) waiting on the webhook — `404` until it's ready. **Shape differs from the webhook/pull-report envelope**: this response is *not* wrapped in `{report, reportV2}` — the report's own fields (`overallScore`, `recommendation`, etc.) and `reportV2` (when present) are all at the top level directly, since there's no externalCandidateId/externalJobId to wrap here. `endReason` is included at the top level whenever `end` was called with a `reason` (see below). |
 | `GET /candidate-api/v1/interviews/{interviewId}/recording/playback` | Fetch a short-lived playback URL for the server-side proctoring recording (see "Proctoring recording" below). `404` until the interview is complete and the recording has finished processing, or if no video was ever published (audio-only interview). |
-| `GET /api/interviewhandoff/livekit-interview/conversation/{interviewId}` | One-time backfill of the transcript so far. |
-| `GET /ws/transcript/{interviewId}` (WebSocket, same host, `ws(s)://`) | Live transcript stream — new turns pushed as the interview happens. No auth header needed (the interview ID itself is the credential, same trust model as the transcript backfill call). |
+| `GET /api/interviewhandoff/livekit-interview/conversation/{interviewId}` | Backfill of the transcript so far. Call it when you open the transcript **and again after every WebSocket reconnect** (see "Keeping the live transcript in sync"). Safe to call repeatedly: merge the result by turn `id`. |
+| `GET /ws/transcript/{interviewId}` (WebSocket, same host, `ws(s)://`) | Live transcript stream — new turns pushed as they are saved. **Live only: turns saved while your socket was down are not replayed on reconnect**, recover them with the backfill call. No auth header needed (the interview ID itself is the credential, same trust model as the transcript backfill call). |
 
 All candidate-api calls (`start`/`device-check`/`end`/`feedback`/`recording/playback`) share the
 same `401`: missing, expired, or malformed `candidateToken` → `{ "success": false, "error":
@@ -449,14 +449,61 @@ else in this section, it's purely for knowing which sessions have incomplete pro
    proceeding — if it's not `'ok'`, stop here and show the candidate the fix, don't render the
    interview UI. Otherwise, render your interview UI, connect to LiveKit with the returned token →
    if `interview.proctoring` is present, start the incProc session too (see above).
-4. While connected: render the transcript from the WS stream (backfill first via the
-   `conversation` endpoint, then append WS turns — see `useTranscriptSocket` in
-   `chapter-interview-frontend` for the reference implementation of this exact pattern).
+4. While connected: render the transcript from the WS stream, merged by turn `id` with the
+   `conversation` backfill, **re-running the backfill after every WebSocket reconnect and about every
+   30 s** — see "Keeping the live transcript in sync" below. A backfill that runs only once leaves a
+   permanent gap after any dropped socket.
 5. Candidate clicks "End interview" (or the AI interviewer signals completion via a transcript
    turn/data message, if you want to auto-detect it) → `POST .../end` → stop the incProc session
    (if one was started) → disconnect the LiveKit room → show a "scoring in progress" state.
 6. Either poll `GET .../feedback` (every few seconds, treating `404` as "not ready yet") or wait
    for your webhook — whichever fits your UI better. The webhook is authoritative either way.
+
+### Keeping the live transcript in sync (required)
+
+`GET /ws/transcript/{interviewId}` is **live only**. A turn is pushed to the sockets connected at the
+moment it is saved; a turn saved while your socket was down is **not replayed** when you reconnect.
+Sockets do drop mid-interview: a network change, a laptop sleeping, and our own servers restarting
+during a deployment. A client that loads the backfill once and then only appends WebSocket frames
+shows a permanent gap after any drop: the interview carries on, but the transcript panel stops
+updating.
+
+Build the transcript panel like this:
+
+1. **Open the socket first, then backfill.** Opening in this order leaves no gap between "everything
+   before" and "everything after".
+2. **Merge by `id`, never append.** Keep a map of `id` to turn, overwrite on a repeat, and sort by
+   `timestamp`. Every frame and every backfill entry has the same shape, so repeats are harmless.
+3. **Reconnect on `close` and `error`**, with a backoff (1 s, doubling to a 5 s ceiling) and no retry
+   limit while the interview is live. **Run the backfill again after every successful reconnect** and
+   merge it in. This is the step the one-time backfill pattern misses.
+4. **Safety net: re-run the backfill every ~30 s while the interview is live.** It is cheap and
+   idempotent, and it covers a socket that stops delivering without ever firing `close`.
+5. **Run one last backfill after `POST .../end`**, so the final turns are on screen.
+
+```ts
+let delay = 1000;
+let live = true;                                  // set false after POST .../end
+const turns = new Map<string, Turn>();           // id -> turn
+const merge = (m: Turn) => { turns.set(m.id, m); render([...turns.values()].sort(byTimestamp)); };
+
+async function backfill() {
+  const r = await fetch(`/api/interviewhandoff/livekit-interview/conversation/${interviewId}`);
+  if (r.ok) (await r.json()).conversation.messages.forEach(merge);
+}
+
+function connect() {
+  const ws = new WebSocket(`${wsBase}/ws/transcript/${interviewId}`);
+  ws.onmessage = (e) => merge(JSON.parse(e.data));
+  ws.onopen = () => { delay = 1000; void backfill(); };   // backfill on every (re)connect
+  ws.onclose = ws.onerror = () => { if (live) setTimeout(connect, delay = Math.min(delay * 2, 5000)); };
+}
+connect();
+const timer = setInterval(() => live && backfill(), 30_000);   // safety net
+```
+
+`type` is `"user"` (the candidate), `"ai"` (the interviewer) or `"system"` (a control note, which you
+may render or hide). Treat any other value as an interviewer-side line.
 
 ## 3. Receive the report — your webhook
 
@@ -902,7 +949,7 @@ already exists.
 | Call `POST .../start`, handle `409`/`503` | Once, when the candidate is ready to begin | `409 invalid_transition` means the interview's already done — route to feedback instead of retrying; `503 interviewer_unavailable` is a transient dispatch failure — retry after `retry_action.after_ms` |
 | Connect to LiveKit, publish audio + video | Immediately after a successful `start` | Audio is required or the AI interviewer hears nothing from the candidate; video is required for the proctoring recording |
 | Render the AI interviewer's remote audio track (`<RoomAudioRenderer/>` or manual attach) | Same as above | Easiest way to get this integration subtly wrong — a connected call with no audio output |
-| Render transcript: backfill via `conversation`, then live-append via `/ws/transcript` | While connected | Backfill covers anything missed before the WS subscription opens; the WS stream carries new turns as they happen |
+| Render transcript: merge by turn `id` the `conversation` backfill and the `/ws/transcript` stream; reconnect the socket with backoff, and re-run the backfill after every reconnect and about every 30 s | While connected | The WS stream is live-only: turns saved while your socket was down are never replayed. Backfill after a reconnect is what fills that gap. **Changed 2026-11-16 (1.5.1): a one-time backfill is no longer enough** |
 | Call `POST .../end` on candidate finish (or auto-detected completion) | When the candidate is done | Triggers scoring; safe to call more than once (`already_ended: true`), so no local state needed to guard against double-calls |
 | Show "scoring in progress", then resolve via `GET .../feedback` poll or backend-relayed webhook result | After `end` | Scoring is async — pick one source of truth (poll vs. backend push) so the UI doesn't race itself |
 | Fetch playback URL via `GET .../recording/playback` if you want to show the proctoring recording in your own UI | After `end`, whenever you need it | URLs expire after 1 hour — re-fetch rather than cache; see "Proctoring recording" above |

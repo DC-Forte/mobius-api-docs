@@ -9,6 +9,21 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## 1.5.1 — 2026-11-16
+
+### Changed
+
+- **Live transcript: a one-time backfill is no longer enough.** `GET /ws/transcript/{interviewId}`
+  is live only — a turn saved while your socket was down is never replayed. Merge the
+  `conversation` backfill and the socket by turn `id`, reconnect the socket with backoff, and
+  re-run the backfill after every reconnect and about every 30 s while the interview is live. See
+  "Keeping the live transcript in sync" in the integration guide.
+
+### Fixed (documentation)
+
+- `TranscriptMessage.type` is `"user"`, `"ai"` or `"system"`. It was documented as
+  `"candidate"` or `"assistant"`, which the API never returns.
+
 ## 1.5.0 — 2026-10-21
 
 ### Added

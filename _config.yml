@@ -1,6 +1,6 @@
 title: Hiresense Handoff API
 description: Docs for Mobius's integration with Hiresense's AI-run interview handoff API.
-version: "1.5.0"
+version: "1.5.1"
 updated: "2026-10-03 05:41 UTC"
 plugins:
   - jekyll-relative-links
