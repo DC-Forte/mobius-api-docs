@@ -9,6 +9,23 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## Unreleased — practice reports (not yet enabled for any partner)
+
+### Added
+
+- `candidateReport` on the webhook body, `GET /internal/handoff/report` and the embedded
+  `.../feedback` response: for a session created with `isPractice: true`, a candidate-facing
+  coaching report delivered under its own key, never inside `reportV2`. Carries no
+  `proctoring_summary` and is not held for proctoring data. Off until enabled per integration
+  (`PRACTICE_CANDIDATE_REPORT`); partners must accept `candidateReport` before they send
+  `isPractice: true`.
+
+### Changed
+
+- `POST /internal/handoff` returns `409` when the `externalCandidateId` + `externalJobId` pair
+  already has a session with a different `isPractice` value. A practice run needs its own
+  `externalJobId`. Previously the existing session was silently resent.
+
 ## 1.5.1 — 2026-11-16
 
 ### Changed

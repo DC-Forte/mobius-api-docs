@@ -106,8 +106,13 @@ handful of recognized keys — `description`, `raw_text`, `text`, `content`, `su
 found) — anything else is passed through as a raw JSON blob to the model as-is, which still
 works but scores worse than clean prose. **For best results, put the resume as plain text under
 `profile.text`.** `isPractice` (optional, default `false`) flags the session as a practice run
-rather than a real interview — only changes what the candidate sees on screen, doesn't change
-how the report is scored or delivered. `returnUrl` is optional — see "Returning the candidate
+rather than a real interview. It changes what the candidate sees on screen. Once practice
+reports are switched on for your integration (we tell you before we do; they are off by
+default), a practice run's report is a **candidate-facing coaching report** delivered under
+`candidateReport` instead of `reportV2` — see "Practice reports" below. **A practice run must
+use its own `externalJobId`**, distinct from the real interview's: a session is keyed on
+`externalCandidateId` + `externalJobId`, so reusing a real interview's pair for a practice run
+(or the reverse) returns `409`. `returnUrl` is optional — see "Returning the candidate
 to your app" below; omit it and no return button is shown.
 
 **Response `200`:**
@@ -554,7 +559,27 @@ of `reportV2`, the body carries `"endedEarly": true` and delivery is marked done
 
 (`endReason` only present when `end` was called with a `reason` — see below.)
 
-A body will always have exactly one of `reportV2` or `endedEarly`, never both.
+A body will always have exactly one of `reportV2`, `candidateReport` or `endedEarly`, never
+more than one.
+
+### Practice reports (`candidateReport`)
+
+A session created with `isPractice: true` produces, once enabled for your integration, a
+coaching report written to the candidate instead of the recruiter report: practice score,
+top fixes, per-question "what to add" and "how to answer", role gaps and a short practice plan.
+It is delivered on the same three paths as `reportV2` — the webhook body, `GET
+/internal/handoff/report`, and the embedded `GET /candidate-api/v1/interviews/{id}/feedback`
+(there at the top level, with `report_version: 3`) — but under its own key, `candidateReport`,
+and **never inside `reportV2`**, so code that parses `reportV2` as the recruiter shape never
+receives a different shape. Differences from `reportV2`:
+
+- No `proctoring_summary`, and delivery never waits for proctoring data.
+- Quotes keep the same `{ text, turn_ref, clip }` shape, so `GET .../clips` works unchanged.
+- It carries a practice score for that one conversation, not a hiring recommendation.
+
+Your webhook endpoint must accept `candidateReport` **before** you start sending `isPractice:
+true`: a body with neither `reportV2` nor `endedEarly` reads as "no report" to a receiver that
+only knows `reportV2`.
 
 **`connectionEndReason` is optional and arrives alongside `reportV2`**, not instead of it — the
 interview had enough content for a real, scored report, it just didn't end the way the

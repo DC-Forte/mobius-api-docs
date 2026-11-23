@@ -841,7 +841,15 @@ components:
         isPractice:
           type: boolean
           default: false
-          description: Optional, defaults to false. Marks this as a practice run rather than a real interview — only changes what the candidate sees on screen, does not change how the interview is scored or delivered to you.
+          description: >
+            Optional, defaults to false. Marks this as a practice run rather
+            than a real interview. Changes what the candidate sees on screen.
+            Once practice reports are enabled for your integration, the report
+            for a practice run is delivered as `candidateReport` instead of
+            `reportV2` (see WebhookReport). A practice run must use its own
+            `externalJobId`: a session is keyed on externalCandidateId +
+            externalJobId, and reusing a real interview's pair for a practice
+            run (or the reverse) returns 409.
         returnUrl:
           type: string
           format: uri
@@ -1122,7 +1130,23 @@ components:
             `report` field on either. An interview whose report isn't on
             this pipeline yet simply isn't delivered — see each endpoint's
             own description for what "not ready" looks like there. Mutually
-            exclusive with `endedEarly` — exactly one of the two is present.
+            exclusive with `candidateReport` and `endedEarly` — exactly one
+            of the three is present.
+        candidateReport:
+          type: object
+          additionalProperties: true
+          description: >
+            Present instead of `reportV2` for a practice run (session created
+            with `isPractice: true`), once practice reports are enabled for
+            your integration. A candidate-facing coaching report: `verdict`
+            (practice score, band, headline), `top_fixes`, `did_well`,
+            `dimensions`, `per_question` (each with what was covered and
+            missed, what to add, how to answer, an answer outline),
+            `communication`, `role_gaps`, `practice_plan`. Quotes use the same
+            `{text, turn_ref, clip}` shape as `reportV2`. Never delivered
+            inside `reportV2`. Carries no `proctoring_summary` and is not held
+            back for proctoring data. Mutually exclusive with `reportV2` and
+            `endedEarly`.
         endedEarly:
           type: boolean
           description: >
