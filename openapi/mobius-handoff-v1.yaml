@@ -1141,7 +1141,8 @@ components:
             your integration. A candidate-facing coaching report: `verdict`
             (practice score, band, headline), `top_fixes`, `did_well`,
             `dimensions`, `per_question` (each with what was covered and
-            missed, what to add, how to answer, an answer outline),
+            missed, what to add, how to answer, an answer outline, and a short
+            example answer from a different, made-up situation),
             `communication`, `role_gaps`, `practice_plan`. Quotes use the same
             `{text, turn_ref, clip}` shape as `reportV2`. Never delivered
             inside `reportV2`. Carries no `proctoring_summary` and is not held

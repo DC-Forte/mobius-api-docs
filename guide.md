@@ -566,7 +566,7 @@ more than one.
 
 A session created with `isPractice: true` produces, once enabled for your integration, a
 coaching report written to the candidate instead of the recruiter report: practice score,
-top fixes, per-question "what to add" and "how to answer", role gaps and a short practice plan.
+top fixes, per-question "what to add", "how to answer" and an example answer from a different, made-up situation, role gaps and a short practice plan.
 It is delivered on the same three paths as `reportV2` — the webhook body, `GET
 /internal/handoff/report`, and the embedded `GET /candidate-api/v1/interviews/{id}/feedback`
 (there at the top level, with `report_version: 3`) — but under its own key, `candidateReport`,
