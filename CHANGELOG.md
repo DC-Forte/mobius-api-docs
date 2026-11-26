@@ -14,18 +14,45 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 ### Added
 
 - New page: [recruiter-report.md](recruiter-report.md) — the JD-vs-resume recruiter report
-  (`POST /recruiterReport` and its webhook), which this API reference did not cover before, and
-  **report v3** (`report_metadata.schema_version` `"4.0"`): `categories[].level`,
-  `present_listed` as `{ skill, source }` objects, `related` and `present_related`
-  (must-have skills only), `experience_background.experience_level`, `candidate_background[].relevant`, and new scoring
-  rules (weights 40/20/10/30, listed and related skill credit, experience and education as
-  levels). Includes the Mobius `recruiter_report/v3.py` changes and the rollout order.
+  (`POST /recruiterReport` and its webhook), which this API reference did not cover before.
+  It includes the Mobius `recruiter_report/v3.py` changes and the rollout order.
+- **Report v3** (`report_metadata.schema_version` `"4.0"`):
+  - `qualification_match.categories[]` has a new `level` (`MATCH`, `ADJACENT`, `NO_MATCH` for
+    Experience and Education, null otherwise). There are always four categories, in a fixed
+    order: Skills match, Responsibility alignment, Experience match, Education match.
+  - `must_have_skills` has new `related` (count) and `present_related` (`{ skill, related_skill,
+    evidence }`). `nice_to_have_skills` has neither field.
+  - `experience_background.experience_level` (`level`, `reason`) and
+    `domain_match.candidate_background[].relevant`.
+  - `responsibility_comparison[].match_level` now produces `SIMILAR` (the value was allowed
+    before, but never produced).
 
 ### Changed
 
+- **Breaking:** `present_listed` entries change from plain skill names to `{ skill, source }`
+  objects in both `must_have_skills` and `nice_to_have_skills`. A parser typed `list[str]`
+  fails validation on a v3 report, so v3 is a new schema version on the Mobius side.
+- `total` is `matched + related + missing` for must-have skills, and `matched + missing`
+  for nice-to-have skills.
+- `percentage` is now a credit percentage, not `matched / total`.
+- New scoring rules (scores and fit bands can differ from a `"3.1"` report):
+  - Weights are skills 40, experience 20, education 10, responsibilities 30 (were 40/30/15/15).
+  - Skill credit: applied 1, listed 0.5, related 0.25 (must-have only).
+  - Experience and education are levels: `MATCH` 100, `ADJACENT` 50, `NO_MATCH` 0. Experience
+    counts only the years in relevant domains.
+  - Responsibilities: `DIRECT` 1, `SIMILAR` 0.5, `NONE` 0.
+  - Fit bands: `HIGH_FIT` 80 and up, `THRESHOLD_FIT` 70 to 79.9, `MEDIUM_FIT` 50 to 69.9,
+    `LOW_FIT` under 50.
+  - A resume written in English counts as proof of English: the skill is listed (0.5) with the
+    source "Resume written in English".
 - Hiresense keeps sending today's shape (`schema_version` `"3.1"`) until Mobius confirms v3 is
-  deployed. `present_listed` changing from names to objects is breaking, so v3 is a new schema
-  version on the Mobius side.
+  deployed.
+
+### Open question for Mobius
+
+- `risk_factors_gaps.hiring_risk_assessment.skill_development_required`: Hiresense sends a list
+  of strings (the v1 form) and v2 expects structured objects. Type it `list[str]` in v3, or ask
+  Hiresense to send the objects. See "Open points" in the recruiter report page.
 
 ## Unreleased — practice reports (not yet enabled for any partner)
 

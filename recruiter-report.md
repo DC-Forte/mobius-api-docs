@@ -221,14 +221,22 @@ Hiresense computes every number. Display them; do not recompute them.
   related skill (not shown on the resume, but the same job was done with a
   different skill) counts 0.25. A task or method skill (for example
   "Functional testing") needs applied evidence in a role; a mention in a
-  skills list does not count. A bucket's
+  skills list does not count. A language skill counts only when the resume
+  states the language, with one exception: a resume written in English is
+  proof of English, so the English skill is listed (0.5) with the source
+  "Resume written in English". A bucket's
   `percentage` is that credit divided by `total`. The skills score is 90%
   must-have and 10% nice-to-have; when the job has only one of the two, the
   score is that bucket's percentage.
 - **Experience** is a level worth 100 (`MATCH`), 50 (`ADJACENT`) or 0
   (`NO_MATCH`). Only years in a relevant domain count. A different domain, or
   relevant years under half the requirement, or two levels below is
-  `NO_MATCH`. Otherwise count shortfalls (a transferable domain, relevant
+  `NO_MATCH`. Each candidate domain is `EXACT`, `SIMILAR` (an accepted domain,
+  or at least half of the role's core systems), `TRANSFERABLE` (at least one
+  core system, fewer than half) or `DIFFERENT` (a different type of work, or
+  the same type of work that covers none of the core systems). When roles have
+  no dates the years are estimated, and the "under half" limit becomes a
+  quarter of the requirement. Otherwise count shortfalls (a transferable domain, relevant
   years under the requirement, one level below): none is `MATCH`, one is
   `ADJACENT`, more is `NO_MATCH`.
 - **Education** is a level worth 100, 50 or 0: nothing required or degree and
@@ -319,11 +327,6 @@ class ExperienceBackground(MobiusBaseModel):
 
 ## Open points
 
-- **Experience level edge cases.** Two rules are being confirmed with the
-  product designer and may move numbers, not the shape: work of the same type
-  that covers none of the role's core systems, and a candidate whose years are
-  estimated because roles have no dates. Display the level and the reason as
-  sent.
 - **`risk_factors_gaps.hiring_risk_assessment.skill_development_required`**:
   Hiresense sends a list of skill-area strings (your v1 form). Your v2
   expects structured objects. For v3 either type it as `list[str]`, or tell us
