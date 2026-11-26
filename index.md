@@ -15,6 +15,11 @@ description: Docs for Mobius's integration with Hiresense's AI-run interview han
     <div class="card-desc">The full walkthrough — flow, auth, webhook payload shape, recording/clips/proctoring endpoints, pausing/resuming the interview.</div>
     <div class="card-arrow">Read the guide &rarr;</div>
   </a>
+  <a class="card" href="{{ '/recruiter-report.html' | relative_url }}">
+    <div class="card-title">Recruiter Report</div>
+    <div class="card-desc">The JD-vs-resume report — request, webhook, report shape, and the proposed v3 shape Mobius needs to add.</div>
+    <div class="card-arrow">Read the recruiter report guide &rarr;</div>
+  </a>
   <a class="card" href="{{ '/api/' | relative_url }}">
     <div class="card-title">API Reference</div>
     <div class="card-desc">Interactive reference generated from the OpenAPI spec — every endpoint, request/response shape, and error case.</div>

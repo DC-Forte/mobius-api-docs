@@ -9,6 +9,24 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
+## Unreleased — recruiter report v3 (proposed, not yet sent to any partner)
+
+### Added
+
+- New page: [recruiter-report.md](recruiter-report.md) — the JD-vs-resume recruiter report
+  (`POST /recruiterReport` and its webhook), which this API reference did not cover before, and
+  **report v3** (`report_metadata.schema_version` `"4.0"`): `categories[].level`,
+  `present_listed` as `{ skill, source }` objects, `related` and `present_related`
+  (must-have skills only), `experience_background.experience_level`, `candidate_background[].relevant`, and new scoring
+  rules (weights 40/20/10/30, listed and related skill credit, experience and education as
+  levels). Includes the Mobius `recruiter_report/v3.py` changes and the rollout order.
+
+### Changed
+
+- Hiresense keeps sending today's shape (`schema_version` `"3.1"`) until Mobius confirms v3 is
+  deployed. `present_listed` changing from names to objects is breaking, so v3 is a new schema
+  version on the Mobius side.
+
 ## Unreleased — practice reports (not yet enabled for any partner)
 
 ### Added
