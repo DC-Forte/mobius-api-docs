@@ -123,10 +123,17 @@ all present: `hiring_recommendation`, `qualification_match`,
 - `experience_background` has a new `experience_level` (`level`, `reason`),
   and each `domain_match.candidate_background[]` entry has a new `relevant`
   flag.
+- `experience_background.profile` has a new `required_years` (number): the
+  years the job requires, `0` when the job states none. Use it with
+  `relevant_years` for the "Relevant experience" tile ("7 yrs required").
+- `risk_factors_gaps.hiring_risk_assessment.skill_development_required` is a
+  list of objects `{ skill_area, priority, training_method, cost_estimate,
+  estimated_time_weeks }` (your `SkillDevelopment`), not skill-name strings.
+  `estimated_time_weeks` is a whole number and is left out when unknown.
 - `responsibility_comparison[].match_level` now really uses `SIMILAR` (the
   value was already allowed, but was not produced before).
 
-Everything else (`hiring_recommendation`, `candidate_strengths`,
+Everything else (`hiring_recommendation`, `candidate_strengths`, the rest of
 `risk_factors_gaps`, `decision_framework`, `education`) is unchanged.
 
 ### Example
@@ -177,7 +184,7 @@ Everything else (`hiring_recommendation`, `candidate_strengths`,
   },
   "experience_background": {
     "experience_level": { "level": "ADJACENT", "reason": "Adjacent: 6 relevant years in data centre commissioning against 7 required, at the required Senior level." },
-    "profile": { "total_years": 8, "relevant_years": 6, "relevant_domain": "Data centre commissioning",
+    "profile": { "total_years": 8, "relevant_years": 6, "required_years": 7, "relevant_domain": "Data centre commissioning",
       "role_level_candidate": "Senior", "role_level_required": "Senior",
       "role_level_assessment": "EXACT", "role_level_implication": "..." },
     "domain_match": {
@@ -191,7 +198,16 @@ Everything else (`hiring_recommendation`, `candidate_strengths`,
     "responsibility_comparison": [ { "responsibility": "...", "candidate_experience": "...", "match_level": "SIMILAR" } ]
   },
   "candidate_strengths": [ { "...": "unchanged" } ],
-  "risk_factors_gaps": { "...": "unchanged" },
+  "risk_factors_gaps": {
+    "...": "unchanged, except skill_development_required below",
+    "hiring_risk_assessment": {
+      "...": "unchanged",
+      "skill_development_required": [
+        { "skill_area": "Commissioning of BMS", "priority": "HIGH", "training_method": "Course",
+          "cost_estimate": "MEDIUM", "estimated_time_weeks": 8 }
+      ]
+    }
+  },
   "decision_framework": { "...": "unchanged" }
 }
 ```
@@ -206,6 +222,8 @@ Everything else (`hiring_recommendation`, `candidate_strengths`,
 | `must_have_skills.present_related[]` | object | `skill` (the job skill), `related_skill` (what the candidate applied instead), `evidence` (the role) |
 | `experience_background.experience_level.level` | string | `MATCH`, `ADJACENT`, `NO_MATCH`; equals the Experience match category's `level` |
 | `experience_background.experience_level.reason` | string | One sentence that starts with "Match:", "Adjacent:" or "No match:" |
+| `experience_background.profile.required_years` | number | Years the job requires; `0` when the job states none (then show no "required" line). Compare with `relevant_years` for the tile colour: meets or exceeds, short by up to 2 years, short by more than 2 |
+| `...hiring_risk_assessment.skill_development_required[]` | object | `skill_area`, `priority` (`HIGH`, `MEDIUM`, `LOW`), `training_method` (e.g. "Course", "On-the-job", "Mentoring"), `cost_estimate` (`LOW`, `MEDIUM`, `HIGH`), `estimated_time_weeks` (integer, may be absent). `[]` when no training is needed |
 | `...candidate_background[].relevant` | boolean | Whether this domain counted toward `profile.relevant_years` |
 | `...responsibility_comparison[].match_level` | string | `DIRECT`, `SIMILAR`, `NONE` |
 
@@ -258,7 +276,8 @@ Hiresense computes every number. Display them; do not recompute them.
    `_DETECT_ORDER` (`["v3", "v2", "v1"]`), then make it
    `CURRENT_REPORT_VERSION` when you are ready to receive it.
 3. Render the new fields (levels in words, the related list on must-have skills, the listed
-   source, the experience level reason, the relevant flag on domains).
+   source, the experience level reason, the relevant flag on domains, the required years on
+   the relevant experience tile).
 4. Tell Hiresense when v3 is deployed on staging, then on production.
 
 Changed classes for `v3.py` (everything else is identical to `v2.py`):
@@ -295,6 +314,11 @@ class SkillsBlock(MobiusBaseModel):
     missing:         list[str]            = Field(default_factory=list)
 
 
+class ExperienceProfile(MobiusBaseModel):
+    # the v2 fields, plus:
+    required_years: float | None = Field(default=None, description="Years the job requires; 0 when it states none")
+
+
 class ExperienceLevel(MobiusBaseModel):
     level:  str = Field(default="", description="MATCH | ADJACENT | NO_MATCH")
     reason: str = Field(default="", description="One sentence: domain match, relevant years against required, role level")
@@ -327,9 +351,6 @@ class ExperienceBackground(MobiusBaseModel):
 
 ## Open points
 
-- **`risk_factors_gaps.hiring_risk_assessment.skill_development_required`**:
-  Hiresense sends a list of skill-area strings (your v1 form). Your v2
-  expects structured objects. For v3 either type it as `list[str]`, or tell us
-  and Hiresense will send the structured objects
-  (`skill_area`, `priority`, `training_method`, `cost_estimate`,
-  `estimated_time_weeks`), which it already has.
+None. `skill_development_required` is sent as the structured objects your v2
+`SkillDevelopment` takes, and `profile.required_years` is sent as described in
+section 4.

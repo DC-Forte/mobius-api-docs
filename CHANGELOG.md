@@ -24,6 +24,8 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
     evidence }`). `nice_to_have_skills` has neither field.
   - `experience_background.experience_level` (`level`, `reason`) and
     `domain_match.candidate_background[].relevant`.
+  - `experience_background.profile.required_years` (number, `0` when the job states no years),
+    for the "Relevant experience" tile.
   - `responsibility_comparison[].match_level` now produces `SIMILAR` (the value was allowed
     before, but never produced).
 
@@ -48,11 +50,9 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 - Hiresense keeps sending today's shape (`schema_version` `"3.1"`) until Mobius confirms v3 is
   deployed.
 
-### Open question for Mobius
-
-- `risk_factors_gaps.hiring_risk_assessment.skill_development_required`: Hiresense sends a list
-  of strings (the v1 form) and v2 expects structured objects. Type it `list[str]` in v3, or ask
-  Hiresense to send the objects. See "Open points" in the recruiter report page.
+- `risk_factors_gaps.hiring_risk_assessment.skill_development_required` is sent as structured
+  objects (`skill_area`, `priority`, `training_method`, `cost_estimate`, `estimated_time_weeks`),
+  the shape of Mobius's v2 `SkillDevelopment`, not as strings.
 
 ## Unreleased — practice reports (not yet enabled for any partner)
 
