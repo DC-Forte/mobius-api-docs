@@ -9,12 +9,16 @@ wide: true
 You send a job description and a candidate resume; Hiresense scores the fit and
 sends back a recruiter-facing report by webhook. This page covers the request,
 the webhook, the report shape, and **report v3**, a new version of the shape
-that Hiresense proposes and that Mobius needs to add before Hiresense sends it.
+that Hiresense now sends to your staging webhook and that Mobius needs to confirm on production.
 
-> **Status of v3: proposed, not live.** Hiresense keeps sending today's shape
-> (below, "v2 shape") until Mobius confirms v3 is deployed. Nothing in this
-> page changes what you receive today. The v3 shape is final unless this
-> page says otherwise; the open points are listed at the end.
+> **Status of v3: released on staging (2026-11-28), not on production.**
+> Hiresense sends the v3 shape (`schema_version` `4.0`) to your staging webhook.
+> It includes `profile.required_years`, which your v3 `ExperienceProfile` must
+> accept: your models reject unknown fields, so staging deliveries fail
+> validation until that field is added. Production still receives today's shape
+> (below, "v2 shape") until Mobius confirms v3 is deployed there. The v3 shape
+> is final unless this page says otherwise; the open points are listed at the
+> end.
 
 This is a different API from the interview handoff in the
 [interview handoff guide](guide.md). It has its own host, its own request and its
@@ -87,10 +91,10 @@ when a shared secret is configured:
 
 | Shape | `report_metadata.schema_version` | Mobius version | Sent |
 | --- | --- | --- | --- |
-| v2 shape | `3.1` | validates as your `v1` today (as `v2` when `skill_development_required` is empty) | now |
-| v3 | `4.0` | new `v3`, to be added | after you confirm |
+| v2 shape | `3.1` | validates as your `v1` today (as `v2` when `skill_development_required` is empty) | production, until v3 is confirmed there |
+| v3 | `4.0` | new `v3` | staging now; production after you confirm |
 
-The v2 shape is what you receive today. Its scores follow the current rules
+The v2 shape is what production receives today. Its scores follow the current rules
 (skills, experience, education and responsibilities weighted 40, 30, 15, 15).
 Reports in v3 are scored by the new rules (see "What the numbers mean"), so a
 candidate's score and fit band can differ between a v2-shape and a v3 report.
@@ -278,7 +282,8 @@ Hiresense computes every number. Display them; do not recompute them.
 3. Render the new fields (levels in words, the related list on must-have skills, the listed
    source, the experience level reason, the relevant flag on domains, the required years on
    the relevant experience tile).
-4. Tell Hiresense when v3 is deployed on staging, then on production.
+4. Add `required_years` to your v3 `ExperienceProfile` (staging already
+   receives v3), then tell Hiresense when v3 is deployed on production.
 
 Changed classes for `v3.py` (everything else is identical to `v2.py`):
 
@@ -343,9 +348,9 @@ class ExperienceBackground(MobiusBaseModel):
 
 ## 7. Rollout
 
-- **Staging**: Hiresense runs the new report generation in staging first and
-  keeps sending the v2 shape to your staging webhook, so nothing breaks.
-  When you confirm v3 on your staging, Hiresense switches staging to v3.
+- **Staging**: released 2026-11-28. Hiresense generates the new report in
+  staging and sends v3 to your staging webhook. Deliveries need
+  `profile.required_years` in your v3 schema; without it validation fails.
 - **Production**: after you confirm v3 on production, Hiresense switches it.
   Rolling back is one setting on our side.
 

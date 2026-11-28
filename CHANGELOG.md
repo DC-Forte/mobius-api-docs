@@ -9,7 +9,7 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
 [guide.md](guide.md)) are recorded here. Versions follow the OpenAPI spec's own
 `info.version`.
 
-## Unreleased — recruiter report v3 (proposed, not yet sent to any partner)
+## Unreleased — recruiter report v3 (released on staging 2026-11-28, not yet on production)
 
 ### Added
 
@@ -47,8 +47,8 @@ All notable changes to the Mobius-facing handoff API ([openapi/mobius-handoff-v1
     `LOW_FIT` under 50.
   - A resume written in English counts as proof of English: the skill is listed (0.5) with the
     source "Resume written in English".
-- Hiresense keeps sending today's shape (`schema_version` `"3.1"`) until Mobius confirms v3 is
-  deployed.
+- Hiresense sends v3 (`schema_version` `"4.0"`) to the Mobius staging webhook since 2026-11-28 and
+  keeps sending today's shape (`"3.1"`) to production until Mobius confirms v3 is deployed there.
 
 - `risk_factors_gaps.hiring_risk_assessment.skill_development_required` is sent as structured
   objects (`skill_area`, `priority`, `training_method`, `cost_estimate`, `estimated_time_weeks`),

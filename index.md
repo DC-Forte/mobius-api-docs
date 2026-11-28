@@ -17,7 +17,7 @@ description: Docs for Mobius's integration with Hiresense's AI-run interview han
   </a>
   <a class="card" href="{{ '/recruiter-report.html' | relative_url }}">
     <div class="card-title">Recruiter Report</div>
-    <div class="card-desc">The JD-vs-resume report — request, webhook, report shape, and the proposed v3 shape Mobius needs to add.</div>
+    <div class="card-desc">The JD-vs-resume report — request, webhook, report shape, and the v3 shape (released on staging).</div>
     <div class="card-arrow">Read the recruiter report guide &rarr;</div>
   </a>
   <a class="card" href="{{ '/api/' | relative_url }}">
